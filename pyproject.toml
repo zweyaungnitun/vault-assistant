@@ -1,0 +1,34 @@
+[project]
+name = "vault-assistant"
+version = "0.1.0"
+description = "Fully offline personal document assistant: RAG Q&A, summarization, action items, PII flagging, local reminders"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn>=0.30",
+    "httpx>=0.27",
+    "pydantic>=2.7",
+    "numpy>=1.26",
+    "pypdf>=4.2",
+    "python-docx>=1.1",
+    "dateparser>=1.2",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0"]
+
+[project.scripts]
+vault = "vault_assistant.cli:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+vault_assistant = ["web/*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

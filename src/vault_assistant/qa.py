@@ -1,0 +1,94 @@
+"""Document Q&A (RAG) with citations.
+
+The model is constrained to answer only from retrieved excerpts and to say
+"Not found in your documents" otherwise. Citations are built from the actual
+retrieved chunks — the model references excerpts by [n] marker and we map
+markers back to real files, so a fabricated citation cannot appear.
+"""
+
+from __future__ import annotations
+
+import re
+from dataclasses import dataclass
+from sqlite3 import Connection
+
+from .chunking import approx_tokens
+from .config import Config
+from .ollama_client import OllamaClient
+from .retrieval import RetrievedChunk, hybrid_search
+from .vectors import VectorIndex
+
+NOT_FOUND = "Not found in your documents"
+
+SYSTEM_PROMPT = f"""You are a personal document assistant. Answer the user's question using ONLY the numbered context excerpts provided. Rules:
+- If the answer is not present in the excerpts, reply with exactly: {NOT_FOUND}
+- Never use outside knowledge or guess.
+- Cite the excerpts you used with bracketed numbers, e.g. [1] or [2][3].
+- Be concise and direct."""
+
+
+@dataclass
+class Source:
+    filename: str
+    path: str
+    page: int | None
+    chunk_idx: int
+
+
+@dataclass
+class QAResult:
+    answer: str
+    sources: list[Source]
+    chunks: list[RetrievedChunk]
+
+
+def _context_block(i: int, chunk: RetrievedChunk) -> str:
+    loc = f", page {chunk.page}" if chunk.page else f", section {chunk.chunk_idx + 1}"
+    return f"[{i}] ({chunk.filename}{loc})\n{chunk.text}"
+
+
+def answer_question(
+    conn: Connection,
+    index: VectorIndex,
+    client: OllamaClient,
+    question: str,
+    cfg: Config,
+) -> QAResult:
+    chunks = hybrid_search(
+        conn,
+        index,
+        client,
+        question,
+        k_vec=cfg.vector_top_k,
+        k_kw=cfg.keyword_top_k,
+        limit=max(cfg.vector_top_k, cfg.keyword_top_k),
+    )
+    if not chunks:
+        return QAResult(answer=NOT_FOUND, sources=[], chunks=[])
+
+    included: list[RetrievedChunk] = []
+    budget = cfg.context_token_budget
+    for c in chunks:
+        cost = approx_tokens(c.text) + 20
+        if included and cost > budget:
+            break
+        included.append(c)
+        budget -= cost
+
+    context = "\n\n".join(_context_block(i + 1, c) for i, c in enumerate(included))
+    user = f"Context excerpts:\n\n{context}\n\nQuestion: {question}"
+    answer = client.chat(SYSTEM_PROMPT, user, temperature=0.2)
+
+    if answer.startswith(NOT_FOUND):
+        return QAResult(answer=NOT_FOUND, sources=[], chunks=included)
+
+    cited = {int(n) for n in re.findall(r"\[(\d+)\]", answer) if 0 < int(n) <= len(included)}
+    used = [included[n - 1] for n in sorted(cited)] if cited else included
+    seen: set[tuple[str, int | None]] = set()
+    sources: list[Source] = []
+    for c in used:
+        key = (c.path, c.page)
+        if key not in seen:
+            seen.add(key)
+            sources.append(Source(filename=c.filename, path=c.path, page=c.page, chunk_idx=c.chunk_idx))
+    return QAResult(answer=answer, sources=sources, chunks=included)
