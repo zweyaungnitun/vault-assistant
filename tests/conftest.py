@@ -20,6 +20,8 @@ class FakeClient:
         self.chat_response = chat_response
         self.json_response = json_response if json_response is not None else {"items": []}
         self.chat_calls: list[tuple[str, str]] = []
+        self.chat_responses: list = []
+        self.response_index = 0
 
     @staticmethod
     def _vec(text: str, dim: int = 32) -> list[float]:
@@ -35,10 +37,19 @@ class FakeClient:
 
     def chat(self, system: str, user: str, **kw) -> str:
         self.chat_calls.append((system, user))
+        if self.chat_responses and self.response_index < len(self.chat_responses):
+            response = self.chat_responses[self.response_index]
+            self.response_index += 1
+            return response
         return self.chat_response
 
     def chat_json(self, system: str, user: str, schema: dict, **kw):
         self.chat_calls.append((system, user))
+        if self.chat_responses and self.response_index < len(self.chat_responses):
+            response = self.chat_responses[self.response_index]
+            self.response_index += 1
+            import json
+            return json.loads(response)
         return self.json_response
 
     def is_up(self) -> bool:
