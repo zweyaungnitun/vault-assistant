@@ -64,6 +64,7 @@ def hybrid_search(
     k_vec: int = 8,
     k_kw: int = 8,
     limit: int = 8,
+    doc_ids: list[int] | None = None,
 ) -> list[RetrievedChunk]:
     query_vec = client.embed([QUERY_PREFIX + question])[0]
     vec_ids = [cid for cid, _ in index.search(query_vec, k=k_vec)]
@@ -75,14 +76,23 @@ def hybrid_search(
 
     by_id = {cid: score for cid, score in fused}
     placeholders = ",".join("?" * len(by_id))
+    
+    # Build document filter if doc_ids provided
+    doc_filter = ""
+    params = list(by_id)
+    if doc_ids:
+        doc_placeholders = ",".join("?" * len(doc_ids))
+        doc_filter = f" AND c.doc_id IN ({doc_placeholders})"
+        params.extend(doc_ids)
+    
     rows = conn.execute(
         f"""
         SELECT c.id, c.doc_id, c.chunk_idx, c.text, c.char_start, c.char_end, c.page,
                d.filename, d.path
         FROM chunks c JOIN documents d ON d.id = c.doc_id
-        WHERE c.id IN ({placeholders})
+        WHERE c.id IN ({placeholders}){doc_filter}
         """,
-        list(by_id),
+        params,
     ).fetchall()
     chunks = [
         RetrievedChunk(

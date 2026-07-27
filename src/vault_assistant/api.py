@@ -33,6 +33,7 @@ WEB_DIR = Path(__file__).parent / "web"
 
 class AskRequest(BaseModel):
     question: str = Field(min_length=1)
+    doc_ids: list[int] | None = None
 
 
 class IngestRequest(BaseModel):
@@ -149,7 +150,8 @@ def create_app(cfg: Config | None = None) -> FastAPI:
     @app.post("/api/ask")
     def ask(req: AskRequest) -> dict:
         result = answer_question(
-            app.state.conn, app.state.index, app.state.client, req.question, app.state.cfg
+            app.state.conn, app.state.index, app.state.client, req.question, app.state.cfg,
+            doc_ids=req.doc_ids
         )
         return {
             "answer": result.answer,
