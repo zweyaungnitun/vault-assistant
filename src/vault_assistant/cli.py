@@ -89,7 +89,8 @@ def cmd_watch(args) -> None:
 
 def cmd_ask(args) -> None:
     cfg, conn, client = _context()
-    result = answer_question(conn, VectorIndex(conn), client, args.question, cfg)
+    doc_ids = args.doc if args.doc else None
+    result = answer_question(conn, VectorIndex(conn), client, args.question, cfg, doc_ids=doc_ids)
     print(result.answer)
     if result.sources:
         print("\nSources:")
@@ -206,6 +207,7 @@ def main(argv: list[str] | None = None) -> None:
 
     p = sub.add_parser("ask", help="ask a question about your documents")
     p.add_argument("question")
+    p.add_argument("--doc", type=int, action="append", help="restrict to document id (repeatable)")
     p.set_defaults(func=cmd_ask)
 
     p = sub.add_parser("summarize", help="summarize 1-3 documents")

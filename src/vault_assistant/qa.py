@@ -53,6 +53,7 @@ def answer_question(
     client: OllamaClient,
     question: str,
     cfg: Config,
+    doc_ids: list[int] | None = None,
 ) -> QAResult:
     chunks = hybrid_search(
         conn,
@@ -62,6 +63,7 @@ def answer_question(
         k_vec=cfg.vector_top_k,
         k_kw=cfg.keyword_top_k,
         limit=max(cfg.vector_top_k, cfg.keyword_top_k),
+        doc_ids=doc_ids,
     )
     if not chunks:
         return QAResult(answer=NOT_FOUND, sources=[], chunks=[])
