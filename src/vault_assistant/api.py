@@ -19,8 +19,10 @@ from pydantic import BaseModel, Field
 
 from . import db, reminders, summarize
 from .actions import extract_actions
+from .agents import answer_question_agentic, AgentQAResult
 from .config import Config, load_config, setup_logging
 from .ingest import ingest_paths
+from .memory import AgentMemory, KnowledgeBase, QueryCache
 from .ollama_client import OllamaClient
 from .pii import scan as pii_scan
 from .qa import answer_question
@@ -105,12 +107,17 @@ def create_app(cfg: Config | None = None) -> FastAPI:
     app.state.client = OllamaClient.from_config(cfg)
     app.state.index = VectorIndex(app.state.conn)
     app.state.ingest_lock = threading.Lock()
+    
+    # Initialize agentic components
+    app.state.cache = QueryCache(max_size=1000, default_ttl=3600)
+    app.state.memory = AgentMemory()
+    app.state.knowledge_base = KnowledgeBase(app.state.conn)
 
     threading.Thread(target=_notifier_loop, args=(app,), daemon=True).start()
 
     @app.get("/", response_class=HTMLResponse)
     def index() -> str:
-        return (WEB_DIR / "index.html").read_text()
+        return (WEB_DIR / "index_enhanced.html").read_text()
 
     @app.get("/api/status")
     def status() -> dict:
@@ -159,6 +166,111 @@ def create_app(cfg: Config | None = None) -> FastAPI:
                 {"filename": s.filename, "path": s.path, "page": s.page} for s in result.sources
             ],
         }
+
+    @app.post("/api/ask-enhanced")
+    def ask_enhanced(req: AskEnhancedRequest) -> dict:
+        """Enhanced Q&A with agentic architecture, memory, cache, and knowledge base."""
+        cache = app.state.cache if req.use_cache else None
+        memory = app.state.memory if req.use_memory else None
+        kb = app.state.knowledge_base if req.use_knowledge else None
+        
+        result: AgentQAResult = answer_question_agentic(
+            app.state.conn,
+            app.state.index,
+            app.state.client,
+            req.question,
+            app.state.cfg,
+            doc_ids=req.doc_ids,
+            cache=cache,
+            memory=memory,
+            knowledge_base=kb,
+        )
+        
+        return {
+            "answer": result.answer,
+            "sources": [
+                {"filename": s.filename, "path": s.path, "page": s.page} for s in result.sources
+            ],
+            "cache_hit": result.iterations == 0,
+            "iterations": result.iterations,
+            "confidence": result.evidence_confidence,
+        }
+
+    @app.get("/api/memory/stats")
+    def memory_stats() -> dict:
+        """Get memory and cache statistics."""
+        cache = app.state.cache
+        memory = app.state.memory
+        
+        return {
+            "cache_hits": cache.hits,
+            "cache_misses": cache.misses,
+            "cache_size": len(cache.cache),
+            "memory_items": len(memory.semantic_memory) if memory.semantic_memory else 0,
+            "conversation_turns": len(memory.conversation_history) if memory.conversation_history else 0,
+        }
+
+    @app.post("/api/cache/clear")
+    def clear_cache() -> dict:
+        """Clear the query cache."""
+        app.state.cache.cache.clear()
+        return {"ok": True}
+
+    @app.post("/api/memory/clear")
+    def clear_memory() -> dict:
+        """Clear agent memory."""
+        app.state.memory.conversation_history.clear()
+        if app.state.memory.semantic_memory:
+            app.state.memory.semantic_memory.clear()
+        return {"ok": True}
+
+    @app.get("/api/knowledge")
+    def get_knowledge() -> list[dict]:
+        """Get all knowledge base facts."""
+        facts = app.state.knowledge_base.query_facts(limit=100)
+        return [{"subject": f.subject, "predicate": f.predicate, "object": f.object} for f in facts]
+
+    @app.post("/api/knowledge")
+    def add_knowledge(req: KnowledgeFactRequest) -> dict:
+        """Add a new fact to the knowledge base."""
+        app.state.knowledge_base.add_fact(req.subject, req.predicate, req.object)
+        return {"ok": True}
+
+    @app.post("/api/knowledge/clear")
+    def clear_knowledge() -> dict:
+        """Clear all knowledge base facts."""
+        app.state.knowledge_base.clear()
+        return {"ok": True}
+
+    @app.post("/api/settings")
+    def update_settings(req: SettingsRequest) -> dict:
+        """Update application settings."""
+        cfg = app.state.cfg
+        
+        if req.gen_model is not None:
+            cfg.gen_model = req.gen_model
+        if req.embed_model is not None:
+            cfg.embed_model = req.embed_model
+        if req.ollama_url is not None:
+            cfg.ollama_url = req.ollama_url
+        if req.vector_top_k is not None:
+            cfg.vector_top_k = req.vector_top_k
+        if req.keyword_top_k is not None:
+            cfg.keyword_top_k = req.keyword_top_k
+        if req.context_token_budget is not None:
+            cfg.context_token_budget = req.context_token_budget
+        if req.cache_ttl is not None:
+            app.state.cache.default_ttl = req.cache_ttl
+        if req.cache_max_size is not None:
+            # Recreate cache with new size
+            old_cache = app.state.cache
+            app.state.cache = QueryCache(max_size=req.cache_max_size, default_ttl=old_cache.default_ttl)
+        
+        # Update client if needed
+        if req.ollama_url or req.gen_model or req.embed_model:
+            app.state.client = OllamaClient.from_config(cfg)
+        
+        return {"ok": True}
 
     @app.post("/api/summarize")
     def summarize_docs(req: SummarizeRequest) -> dict:
