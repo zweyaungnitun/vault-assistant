@@ -42,9 +42,37 @@ class QAResult:
     chunks: list[RetrievedChunk]
 
 
-def _context_block(i: int, chunk: RetrievedChunk) -> str:
+def context_block(i: int, chunk: RetrievedChunk) -> str:
     loc = f", page {chunk.page}" if chunk.page else f", section {chunk.chunk_idx + 1}"
     return f"[{i}] ({chunk.filename}{loc})\n{chunk.text}"
+
+
+def pack_context(chunks: list[RetrievedChunk], budget: int) -> list[RetrievedChunk]:
+    """Greedily keep chunks (in given order) while staying inside a token budget."""
+    included: list[RetrievedChunk] = []
+    for c in chunks:
+        cost = approx_tokens(c.text) + 20
+        if included and cost > budget:
+            break
+        included.append(c)
+        budget -= cost
+    return included
+
+
+def resolve_citations(answer: str, included: list[RetrievedChunk]) -> list[Source]:
+    """Map [n] markers in the answer back to the chunks actually included in the
+    prompt — a fabricated or out-of-range citation is silently ignored, never
+    trusted to reference something it doesn't."""
+    cited = {int(n) for n in re.findall(r"\[(\d+)\]", answer) if 0 < int(n) <= len(included)}
+    used = [included[n - 1] for n in sorted(cited)] if cited else included
+    seen: set[tuple[str, int | None]] = set()
+    sources: list[Source] = []
+    for c in used:
+        key = (c.path, c.page)
+        if key not in seen:
+            seen.add(key)
+            sources.append(Source(filename=c.filename, path=c.path, page=c.page, chunk_idx=c.chunk_idx))
+    return sources
 
 
 def answer_question(
@@ -53,6 +81,7 @@ def answer_question(
     client: OllamaClient,
     question: str,
     cfg: Config,
+    extra_context: str = "",
 ) -> QAResult:
     chunks = hybrid_search(
         conn,
@@ -66,29 +95,15 @@ def answer_question(
     if not chunks:
         return QAResult(answer=NOT_FOUND, sources=[], chunks=[])
 
-    included: list[RetrievedChunk] = []
-    budget = cfg.context_token_budget
-    for c in chunks:
-        cost = approx_tokens(c.text) + 20
-        if included and cost > budget:
-            break
-        included.append(c)
-        budget -= cost
+    included = pack_context(chunks, cfg.context_token_budget)
 
-    context = "\n\n".join(_context_block(i + 1, c) for i, c in enumerate(included))
-    user = f"Context excerpts:\n\n{context}\n\nQuestion: {question}"
+    context = "\n\n".join(context_block(i + 1, c) for i, c in enumerate(included))
+    prefix = f"{extra_context}\n\n" if extra_context else ""
+    user = f"{prefix}Context excerpts:\n\n{context}\n\nQuestion: {question}"
     answer = client.chat(SYSTEM_PROMPT, user, temperature=0.2)
 
     if answer.startswith(NOT_FOUND):
         return QAResult(answer=NOT_FOUND, sources=[], chunks=included)
 
-    cited = {int(n) for n in re.findall(r"\[(\d+)\]", answer) if 0 < int(n) <= len(included)}
-    used = [included[n - 1] for n in sorted(cited)] if cited else included
-    seen: set[tuple[str, int | None]] = set()
-    sources: list[Source] = []
-    for c in used:
-        key = (c.path, c.page)
-        if key not in seen:
-            seen.add(key)
-            sources.append(Source(filename=c.filename, path=c.path, page=c.page, chunk_idx=c.chunk_idx))
+    sources = resolve_citations(answer, included)
     return QAResult(answer=answer, sources=sources, chunks=included)

@@ -1,5 +1,5 @@
 """SQLite storage: documents, chunks (with embeddings as float32 BLOBs),
-FTS5 keyword index, reminders, and metadata.
+FTS5 keyword index, reminders, agent memory, knowledge base, and metadata.
 
 Chunks store char offsets and page numbers so Phase 3 inline citations can be
 added without re-ingesting existing corpora. The FTS index is kept in sync
@@ -62,6 +62,49 @@ CREATE TABLE IF NOT EXISTS reminders (
     status      TEXT NOT NULL DEFAULT 'pending',
     source_text TEXT
 );
+
+-- Agent memory (memory.py): short-term conversation history and long-term
+-- semantic memory, both pruned to a configured cap on every write.
+CREATE TABLE IF NOT EXISTS conversation_turns (
+    id         INTEGER PRIMARY KEY,
+    role       TEXT NOT NULL CHECK(role IN ('user','assistant')),
+    content    TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS semantic_memory (
+    id         INTEGER PRIMARY KEY,
+    text       TEXT NOT NULL,
+    source     TEXT,
+    importance REAL NOT NULL DEFAULT 0.5 CHECK(importance >= 0.0 AND importance <= 1.0),
+    tags       TEXT,
+    created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_semantic_memory_importance ON semantic_memory(importance DESC);
+
+-- Knowledge base (memory.py): structured subject-predicate-object facts and
+-- tracked entities, kept case-insensitive so extraction doesn't fragment on casing.
+CREATE TABLE IF NOT EXISTS kb_entities (
+    id          INTEGER PRIMARY KEY,
+    name        TEXT NOT NULL UNIQUE COLLATE NOCASE,
+    entity_type TEXT,
+    description TEXT,
+    created_at  TEXT NOT NULL,
+    updated_at  TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS kb_facts (
+    id         INTEGER PRIMARY KEY,
+    subject    TEXT NOT NULL COLLATE NOCASE,
+    predicate  TEXT NOT NULL COLLATE NOCASE,
+    object     TEXT NOT NULL COLLATE NOCASE,
+    confidence REAL NOT NULL DEFAULT 1.0 CHECK(confidence >= 0.0 AND confidence <= 1.0),
+    source     TEXT,
+    created_at TEXT NOT NULL,
+    UNIQUE(subject, predicate, object)
+);
+CREATE INDEX IF NOT EXISTS idx_kb_facts_subject ON kb_facts(subject);
+CREATE INDEX IF NOT EXISTS idx_kb_facts_object ON kb_facts(object);
 """
 
 

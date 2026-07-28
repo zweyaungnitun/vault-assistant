@@ -33,6 +33,29 @@ class Config:
     num_ctx: int = 8192
     request_timeout: float = 300.0
 
+    # Agentic Q&A pipeline (agents.py)
+    agentic_qa: bool = True
+    agentic_min_words_for_decompose: int = 8
+    agentic_max_words_simple: int = 30
+    agentic_conjunctions: list[str] = field(
+        default_factory=lambda: [" and ", " as well as ", " along with ", " & ", " plus "]
+    )
+    agentic_max_subqueries: int = 4
+    agentic_max_candidates: int = 20
+    agentic_excerpt_chars: int = 300
+    agentic_relevance_threshold: float = 0.3
+    agentic_evidence_top_n: int = 12
+    agentic_verify: bool = True
+
+    # Query cache / agent memory / knowledge base (memory.py)
+    cache_max_size: int = 1000
+    cache_default_ttl: float = 3600.0
+    memory_max_turns: int = 10
+    memory_max_items: int = 100
+    memory_context_budget: int = 400
+    memory_top_k_facts: int = 5
+    kb_find_related_limit: int = 50
+
     @property
     def db_path(self) -> Path:
         return self.data_dir / "vault.db"
@@ -58,6 +81,23 @@ def load_config(config_file: Path | None = None) -> Config:
             "context_token_budget",
             "num_ctx",
             "request_timeout",
+            "agentic_qa",
+            "agentic_min_words_for_decompose",
+            "agentic_max_words_simple",
+            "agentic_conjunctions",
+            "agentic_max_subqueries",
+            "agentic_max_candidates",
+            "agentic_excerpt_chars",
+            "agentic_relevance_threshold",
+            "agentic_evidence_top_n",
+            "agentic_verify",
+            "cache_max_size",
+            "cache_default_ttl",
+            "memory_max_turns",
+            "memory_max_items",
+            "memory_context_budget",
+            "memory_top_k_facts",
+            "kb_find_related_limit",
         ):
             if key in raw:
                 setattr(cfg, key, raw[key])
