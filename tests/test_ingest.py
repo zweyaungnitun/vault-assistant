@@ -1,6 +1,6 @@
 import os
 
-from vault_assistant import db
+from vault_assistant import db, permissions
 from vault_assistant.ingest import ingest_paths
 
 
@@ -94,6 +94,30 @@ def test_chunks_and_fts_stay_in_sync(tmp_path, conn, client):
         .fetchone()["n"]
         == 0
     )
+
+
+def test_no_access_folder_is_skipped_on_ingest(tmp_path, conn, client):
+    folder = tmp_path / "docs"
+    (folder / "private").mkdir(parents=True)
+    _write(folder / "visible.txt", "should be ingested " * 10)
+    _write(folder / "private" / "secret.txt", "should not be ingested " * 10)
+    permissions.set_folder(conn, str(folder / "private"), "no_access")
+
+    r = ingest_paths(conn, client, [folder])
+    assert r.added == 1
+    assert r.blocked == 1
+    assert db.list_documents(conn)[0]["filename"] == "visible.txt"
+
+
+def test_readonly_folder_still_ingests_normally(tmp_path, conn, client):
+    folder = tmp_path / "docs"
+    folder.mkdir()
+    _write(folder / "a.txt", "Read only content here. " * 20)
+    permissions.set_folder(conn, str(folder), "readonly")
+
+    r = ingest_paths(conn, client, [folder])
+    assert r.added == 1
+    assert r.blocked == 0
 
 
 def test_embedding_model_mismatch_detected(tmp_path, conn, client):

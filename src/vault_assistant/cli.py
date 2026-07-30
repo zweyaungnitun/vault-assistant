@@ -8,7 +8,7 @@ import sys
 import time
 from pathlib import Path
 
-from . import db, reminders, summarize
+from . import db, permissions, reminders, summarize
 from .actions import extract_actions
 from .config import load_config, setup_logging
 from .extractors import extract
@@ -181,6 +181,36 @@ def cmd_docs(args) -> None:
         print(f"#{d['id']:<4} {d['filename']}  ({d['chunk_count']} chunks){status}")
 
 
+def cmd_folders(args) -> None:
+    _, conn, _ = _context(need_ollama=False)
+    if args.remove is not None:
+        try:
+            permissions.remove_folder(conn, args.remove)
+        except ValueError as exc:
+            sys.exit(f"error: {exc}")
+        print(f"removed folder permission #{args.remove}")
+        return
+    if args.set:
+        path, level = args.set
+        try:
+            folder = permissions.set_folder(conn, path, level)
+        except ValueError as exc:
+            sys.exit(f"error: {exc}")
+        print(f"#{folder.id:<4} {folder.path}  [{folder.access_level}]")
+        return
+    folders = permissions.list_folders(conn)
+    if not folders:
+        print("no folder permissions configured (all folders default to 'edit')")
+        return
+    for f in folders:
+        prefix = f.path.rstrip("/") + "/"
+        n = conn.execute(
+            "SELECT COUNT(*) AS n FROM documents WHERE path = ? OR path LIKE ?",
+            (f.path, prefix + "%"),
+        ).fetchone()["n"]
+        print(f"#{f.id:<4} {f.path}  [{f.access_level}]  ({n} documents)")
+
+
 def cmd_serve(args) -> None:
     from .api import run
 
@@ -237,6 +267,14 @@ def main(argv: list[str] | None = None) -> None:
     p.set_defaults(func=cmd_reminders)
 
     sub.add_parser("docs", help="list ingested documents").set_defaults(func=cmd_docs)
+
+    p = sub.add_parser("folders", help="manage per-folder access control (readonly/edit/no_access)")
+    p.add_argument(
+        "--set", nargs=2, metavar=("PATH", "LEVEL"),
+        help=f"set a folder's access level: {', '.join(permissions.LEVELS)}",
+    )
+    p.add_argument("--remove", type=int, metavar="ID", help="remove a folder's permission override")
+    p.set_defaults(func=cmd_folders)
 
     p = sub.add_parser("serve", help="start the local web UI")
     p.add_argument("--port", type=int, default=8756)

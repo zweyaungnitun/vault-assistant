@@ -17,7 +17,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
 
-from . import db, reminders, summarize
+from . import db, permissions, reminders, summarize
 from .actions import extract_actions
 from .config import Config, load_config, setup_logging
 from .ingest import ingest_paths
@@ -58,6 +58,15 @@ class PIIRequest(BaseModel):
 
 class ReminderRequest(BaseModel):
     text: str = Field(min_length=1)
+
+
+class FolderCreateRequest(BaseModel):
+    path: str = Field(min_length=1)
+    access_level: str = "edit"
+
+
+class FolderUpdateRequest(BaseModel):
+    access_level: str
 
 
 def _notifier_loop(app: FastAPI) -> None:
@@ -128,7 +137,70 @@ def create_app(cfg: Config | None = None) -> FastAPI:
 
     @app.get("/api/documents")
     def documents() -> list[dict]:
-        return db.list_documents(app.state.conn)
+        conn = app.state.conn
+        docs = db.list_documents(conn)
+        for d in docs:
+            d["access_level"] = permissions.resolve_access_level(conn, d["path"])
+        return docs
+
+    @app.delete("/api/documents/{doc_id}")
+    def delete_document(doc_id: int) -> dict:
+        conn = app.state.conn
+        row = conn.execute("SELECT path FROM documents WHERE id = ?", (doc_id,)).fetchone()
+        if row is None:
+            raise HTTPException(404, f"no document {doc_id}")
+        level = permissions.resolve_access_level(conn, row["path"])
+        if level != "edit":
+            raise HTTPException(403, f"document is {level}; deleting requires edit access")
+        conn.execute("DELETE FROM documents WHERE id = ?", (doc_id,))
+        conn.commit()
+        db.bump_generation(conn)
+        return {"ok": True}
+
+    @app.get("/api/folders")
+    def list_folders() -> list[dict]:
+        conn = app.state.conn
+        result = []
+        for folder in permissions.list_folders(conn):
+            prefix = folder.path.rstrip("/") + "/"
+            n = conn.execute(
+                "SELECT COUNT(*) AS n FROM documents WHERE path = ? OR path LIKE ?",
+                (folder.path, prefix + "%"),
+            ).fetchone()["n"]
+            result.append({**folder.to_dict(), "document_count": n})
+        return result
+
+    @app.post("/api/folders")
+    def create_folder(req: FolderCreateRequest) -> dict:
+        path = Path(req.path).expanduser()
+        if not path.exists() or not path.is_dir():
+            raise HTTPException(400, f"not a directory: {req.path}")
+        try:
+            folder = permissions.set_folder(app.state.conn, str(path), req.access_level)
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
+        return folder.to_dict()
+
+    @app.put("/api/folders/{folder_id}")
+    def update_folder(folder_id: int, req: FolderUpdateRequest) -> dict:
+        conn = app.state.conn
+        try:
+            existing = permissions.get_folder(conn, folder_id)
+        except ValueError as exc:
+            raise HTTPException(404, str(exc)) from exc
+        try:
+            folder = permissions.set_folder(conn, existing.path, req.access_level)
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
+        return folder.to_dict()
+
+    @app.delete("/api/folders/{folder_id}")
+    def delete_folder(folder_id: int) -> dict:
+        try:
+            permissions.remove_folder(app.state.conn, folder_id)
+        except ValueError as exc:
+            raise HTTPException(404, str(exc)) from exc
+        return {"ok": True}
 
     @app.post("/api/ingest")
     def ingest(req: IngestRequest) -> dict:
@@ -136,6 +208,13 @@ def create_app(cfg: Config | None = None) -> FastAPI:
         missing = [str(p) for p in paths if not p.expanduser().exists()]
         if missing:
             raise HTTPException(400, f"paths do not exist: {missing}")
+        if req.force:
+            locked = [
+                str(p) for p in paths
+                if permissions.resolve_access_level(app.state.conn, str(p)) != "edit"
+            ]
+            if locked:
+                raise HTTPException(403, f"force re-ingest requires edit access: {locked}")
         with app.state.ingest_lock:
             report = ingest_paths(app.state.conn, app.state.client, paths, force=req.force)
         return {
@@ -143,6 +222,7 @@ def create_app(cfg: Config | None = None) -> FastAPI:
             "updated": report.updated,
             "skipped": report.skipped,
             "removed": report.removed,
+            "blocked": report.blocked,
             "failed": [{"path": p, "error": e} for p, e in report.failed],
         }
 

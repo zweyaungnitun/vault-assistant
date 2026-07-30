@@ -23,6 +23,7 @@ from .chunking import chunk_text
 from .db import bump_generation, get_meta, set_meta
 from .extractors import SUPPORTED_EXTENSIONS, ExtractionError, extract
 from .ollama_client import DOC_PREFIX, OllamaClient
+from .permissions import resolve_access_level
 
 logger = logging.getLogger("vault.ingest")
 
@@ -33,12 +34,14 @@ class IngestReport:
     updated: int = 0
     skipped: int = 0
     removed: int = 0
+    blocked: int = 0
     failed: list[tuple[str, str]] = field(default_factory=list)
 
     def summary(self) -> str:
         parts = (
             f"{self.added} added, {self.updated} updated, {self.skipped} unchanged, "
-            f"{self.removed} removed, {len(self.failed)} failed"
+            f"{self.removed} removed, {self.blocked} blocked (no_access), "
+            f"{len(self.failed)} failed"
         )
         return parts
 
@@ -85,6 +88,15 @@ def ingest_paths(
     report = IngestReport()
     paths = [p.expanduser().resolve() for p in paths]
     files = iter_files(paths)
+
+    accessible_files = []
+    for f in files:
+        if resolve_access_level(conn, str(f)) == "no_access":
+            report.blocked += 1
+        else:
+            accessible_files.append(f)
+    files = accessible_files
+
     seen: set[str] = set()
 
     for f in files:

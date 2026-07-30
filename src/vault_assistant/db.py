@@ -105,6 +105,18 @@ CREATE TABLE IF NOT EXISTS kb_facts (
 );
 CREATE INDEX IF NOT EXISTS idx_kb_facts_subject ON kb_facts(subject);
 CREATE INDEX IF NOT EXISTS idx_kb_facts_object ON kb_facts(object);
+
+-- Folder access control (permissions.py): access_level for a folder path is
+-- resolved by longest-prefix match against a document's path, so a folder
+-- can be locked down without touching every document under it individually.
+CREATE TABLE IF NOT EXISTS folder_permissions (
+    id           INTEGER PRIMARY KEY,
+    path         TEXT NOT NULL UNIQUE,
+    access_level TEXT NOT NULL DEFAULT 'edit'
+                 CHECK(access_level IN ('readonly', 'edit', 'no_access')),
+    created_at   TEXT NOT NULL,
+    updated_at   TEXT NOT NULL
+);
 """
 
 
