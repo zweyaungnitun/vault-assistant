@@ -14,6 +14,7 @@ from sqlite3 import Connection
 
 from .chunking import approx_tokens
 from .config import Config
+from .observability import observe, update_current_span
 from .ollama_client import OllamaClient
 from .retrieval import RetrievedChunk, hybrid_search
 from .vectors import VectorIndex
@@ -75,6 +76,7 @@ def resolve_citations(answer: str, included: list[RetrievedChunk]) -> list[Sourc
     return sources
 
 
+@observe(name="qa.answer_question", as_type="chain", capture_input=False, capture_output=False)
 def answer_question(
     conn: Connection,
     index: VectorIndex,
@@ -83,6 +85,7 @@ def answer_question(
     cfg: Config,
     extra_context: str = "",
 ) -> QAResult:
+    update_current_span(input={"question": question})
     chunks = hybrid_search(
         conn,
         index,
@@ -93,6 +96,7 @@ def answer_question(
         limit=max(cfg.vector_top_k, cfg.keyword_top_k),
     )
     if not chunks:
+        update_current_span(output={"answer": NOT_FOUND, "sources": 0})
         return QAResult(answer=NOT_FOUND, sources=[], chunks=[])
 
     included = pack_context(chunks, cfg.context_token_budget)
@@ -100,10 +104,12 @@ def answer_question(
     context = "\n\n".join(context_block(i + 1, c) for i, c in enumerate(included))
     prefix = f"{extra_context}\n\n" if extra_context else ""
     user = f"{prefix}Context excerpts:\n\n{context}\n\nQuestion: {question}"
-    answer = client.chat(SYSTEM_PROMPT, user, temperature=0.2)
+    answer = client.chat(SYSTEM_PROMPT, user, temperature=0.2, trace_name="answer")
 
     if answer.startswith(NOT_FOUND):
+        update_current_span(output={"answer": NOT_FOUND, "sources": 0})
         return QAResult(answer=NOT_FOUND, sources=[], chunks=included)
 
     sources = resolve_citations(answer, included)
+    update_current_span(output={"answer": answer, "sources": len(sources)})
     return QAResult(answer=answer, sources=sources, chunks=included)

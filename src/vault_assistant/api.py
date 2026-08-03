@@ -21,6 +21,7 @@ from . import db, permissions, reminders, summarize
 from .actions import extract_actions
 from .config import Config, load_config, setup_logging
 from .ingest import ingest_paths
+from .observability import init_observability
 from .ollama_client import OllamaClient
 from .pii import scan as pii_scan
 from .qa import answer_question
@@ -107,6 +108,7 @@ def _doc_or_text(app: FastAPI, text: str | None, doc_id: int | None) -> str:
 def create_app(cfg: Config | None = None) -> FastAPI:
     cfg = cfg or load_config()
     setup_logging(cfg)
+    init_observability(cfg)
     app = FastAPI(title="Vault Assistant", docs_url=None, redoc_url=None, openapi_url=None)
     app.state.cfg = cfg
     app.state.conn = db.connect(cfg.db_path)

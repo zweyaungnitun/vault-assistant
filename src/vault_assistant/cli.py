@@ -13,6 +13,7 @@ from .actions import extract_actions
 from .config import load_config, setup_logging
 from .extractors import extract
 from .ingest import ingest_paths
+from .observability import init_observability
 from .ollama_client import OllamaClient
 from .pii import scan as pii_scan
 from .qa import answer_question
@@ -22,6 +23,7 @@ from .vectors import VectorIndex
 def _context(need_ollama: bool = True):
     cfg = load_config()
     setup_logging(cfg)
+    init_observability(cfg)
     conn = db.connect(cfg.db_path)
     client = OllamaClient.from_config(cfg)
     if need_ollama:

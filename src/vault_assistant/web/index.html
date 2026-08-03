@@ -1,0 +1,825 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Vault Assistant</title>
+<style>
+  :root {
+    --bg: #f5f5f7;
+    --surface: #ffffff;
+    --surface-2: #fafafb;
+    --border: #e3e3e8;
+    --text: #1a1a1e;
+    --text-muted: #6b6b76;
+    --primary: #4f46e5;
+    --primary-hover: #4338ca;
+    --primary-soft: #eef0fe;
+    --success: #16a34a;
+    --success-soft: #eafaf0;
+    --warning: #b45309;
+    --warning-soft: #fdf3e2;
+    --danger: #dc2626;
+    --danger-soft: #fdecec;
+    --radius: 10px;
+    --radius-lg: 14px;
+    --shadow: 0 1px 2px rgba(20, 20, 30, .04), 0 6px 20px rgba(20, 20, 30, .06);
+    --font: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Roboto, Helvetica, Arial, sans-serif;
+  }
+  :root[data-theme="dark"] {
+    --bg: #101014;
+    --surface: #18181e;
+    --surface-2: #1e1e25;
+    --border: #2b2b34;
+    --text: #f0f0f3;
+    --text-muted: #9a9aa5;
+    --primary: #818cf8;
+    --primary-hover: #a5b0fb;
+    --primary-soft: #23233a;
+    --success: #4ade80;
+    --success-soft: #17301f;
+    --warning: #f5a524;
+    --warning-soft: #332608;
+    --danger: #f87171;
+    --danger-soft: #341c1c;
+    --shadow: 0 1px 2px rgba(0, 0, 0, .3), 0 8px 24px rgba(0, 0, 0, .35);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #101014;
+      --surface: #18181e;
+      --surface-2: #1e1e25;
+      --border: #2b2b34;
+      --text: #f0f0f3;
+      --text-muted: #9a9aa5;
+      --primary: #818cf8;
+      --primary-hover: #a5b0fb;
+      --primary-soft: #23233a;
+      --success: #4ade80;
+      --success-soft: #17301f;
+      --warning: #f5a524;
+      --warning-soft: #332608;
+      --danger: #f87171;
+      --danger-soft: #341c1c;
+      --shadow: 0 1px 2px rgba(0, 0, 0, .3), 0 8px 24px rgba(0, 0, 0, .35);
+    }
+  }
+
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  html, body { height: 100%; }
+  body {
+    margin: 0;
+    font-family: var(--font);
+    background: var(--bg);
+    color: var(--text);
+    -webkit-font-smoothing: antialiased;
+  }
+  h1 { font-size: 1.35rem; font-weight: 650; margin: 0 0 4px; letter-spacing: -0.01em; }
+  h2 { font-size: 1rem; font-weight: 600; margin: 0 0 10px; }
+  .subtitle { color: var(--text-muted); font-size: .88rem; margin: 0 0 20px; max-width: 60ch; }
+  .muted { color: var(--text-muted); }
+  .small { font-size: .78rem; }
+
+  .app { display: flex; min-height: 100vh; }
+
+  .sidebar {
+    width: 232px;
+    flex-shrink: 0;
+    background: var(--surface);
+    border-right: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    padding: 18px 12px;
+    position: sticky;
+    top: 0;
+    height: 100vh;
+  }
+  .brand {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-weight: 650;
+    font-size: 1rem;
+    padding: 6px 10px 18px;
+  }
+  .brand .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--primary); flex-shrink: 0; }
+  nav { display: flex; flex-direction: column; gap: 2px; flex: 1; }
+  .nav-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    text-align: left;
+    border: none;
+    background: transparent;
+    color: var(--text-muted);
+    font: inherit;
+    font-size: .88rem;
+    font-weight: 500;
+    padding: 9px 10px;
+    border-radius: 8px;
+    cursor: pointer;
+  }
+  .nav-item:hover { background: var(--surface-2); color: var(--text); }
+  .nav-item.active { background: var(--primary-soft); color: var(--primary); }
+  .nav-icon { font-size: 1rem; width: 18px; text-align: center; }
+
+  .sidebar-footer { display: flex; flex-direction: column; gap: 8px; }
+  .status-pill {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    font-size: .76rem;
+    color: var(--text-muted);
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    padding: 7px 11px;
+  }
+  .status-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--text-muted); flex-shrink: 0; }
+  .status-dot.up { background: var(--success); }
+  .status-dot.down { background: var(--danger); }
+  .theme-toggle {
+    border: 1px solid var(--border);
+    background: var(--surface-2);
+    color: var(--text-muted);
+    border-radius: 8px;
+    padding: 7px 10px;
+    font-size: .76rem;
+    cursor: pointer;
+    font: inherit;
+  }
+
+  main { flex: 1; min-width: 0; padding: 34px 40px 60px; max-width: 920px; }
+
+  .tab { display: none; }
+  .tab.active { display: block; }
+
+  .panel-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 4px; }
+  .header-actions { display: flex; gap: 8px; flex-shrink: 0; }
+
+  .banner {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    background: var(--warning-soft);
+    color: var(--warning);
+    border: 1px solid var(--warning);
+    border-radius: var(--radius);
+    padding: 10px 14px;
+    font-size: .84rem;
+    margin-bottom: 18px;
+  }
+
+  .btn {
+    font: inherit;
+    font-size: .84rem;
+    font-weight: 500;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    background: var(--surface);
+    color: var(--text);
+    padding: 8px 14px;
+    cursor: pointer;
+    white-space: nowrap;
+  }
+  .btn:hover:not(:disabled) { background: var(--surface-2); }
+  .btn:disabled { opacity: .45; cursor: not-allowed; }
+  .btn.primary { background: var(--primary); border-color: var(--primary); color: #fff; }
+  .btn.primary:hover:not(:disabled) { background: var(--primary-hover); border-color: var(--primary-hover); }
+  .btn.danger { color: var(--danger); }
+  .btn.danger:hover:not(:disabled) { background: var(--danger-soft); }
+  .btn.icon { padding: 6px 9px; font-size: .8rem; line-height: 1; }
+
+  select, input[type=text], textarea {
+    font: inherit;
+    font-size: .86rem;
+    border: 1px solid var(--border);
+    background: var(--surface);
+    color: var(--text);
+    border-radius: 8px;
+    padding: 9px 11px;
+  }
+  select:focus, input:focus, textarea:focus, .btn:focus-visible {
+    outline: 2px solid var(--primary);
+    outline-offset: 1px;
+  }
+
+  .panel { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 22px; box-shadow: var(--shadow); margin-bottom: 22px; }
+
+  /* Ask tab */
+  .ask-form { display: flex; gap: 10px; align-items: flex-start; }
+  .ask-form textarea { flex: 1; resize: vertical; min-height: 44px; font-family: var(--font); }
+  .ask-history { display: flex; flex-direction: column; gap: 14px; }
+  .turn { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 18px 20px; box-shadow: var(--shadow); }
+  .turn .question { font-weight: 600; margin-bottom: 10px; }
+  .turn .answer { white-space: pre-wrap; line-height: 1.55; font-size: .92rem; }
+  .turn .answer.not-found { color: var(--text-muted); font-style: italic; }
+  .sources { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px; }
+  .source-chip {
+    font-size: .74rem;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    color: var(--text-muted);
+    border-radius: 999px;
+    padding: 3px 10px;
+  }
+  .empty { color: var(--text-muted); font-size: .86rem; padding: 24px 4px; }
+  .spinner {
+    width: 16px; height: 16px; border-radius: 50%;
+    border: 2px solid var(--border); border-top-color: var(--primary);
+    animation: spin .7s linear infinite; display: inline-block; vertical-align: -3px; margin-right: 8px;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* Documents tab */
+  .toolbar {
+    display: flex; align-items: center; gap: 10px;
+    background: var(--primary-soft); border-radius: var(--radius);
+    padding: 10px 14px; margin-bottom: 14px; font-size: .84rem;
+  }
+  .toolbar #selectionCount { font-weight: 600; color: var(--primary); margin-right: 4px; }
+  .doc-list, .folder-list, .reminder-list { display: flex; flex-direction: column; gap: 8px; }
+  .doc-row, .folder-row, .reminder-row {
+    display: flex; align-items: center; gap: 12px;
+    background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+    padding: 12px 14px;
+  }
+  .doc-main, .folder-main { flex: 1; min-width: 0; cursor: pointer; }
+  .doc-name, .folder-path, .reminder-title { font-weight: 550; font-size: .88rem; overflow-wrap: anywhere; }
+  .doc-meta { display: flex; align-items: center; gap: 8px; margin-top: 4px; font-size: .78rem; }
+
+  .badge {
+    display: inline-flex; align-items: center; gap: 4px;
+    font-size: .72rem; font-weight: 600; border-radius: 999px; padding: 2px 9px;
+    background: var(--surface-2); color: var(--text-muted); border: 1px solid var(--border);
+  }
+  .badge.ok { color: var(--success); background: var(--success-soft); border-color: transparent; }
+  .badge.error { color: var(--danger); background: var(--danger-soft); border-color: transparent; }
+  .badge.edit { color: var(--success); background: var(--success-soft); border-color: transparent; }
+  .badge.readonly { color: var(--warning); background: var(--warning-soft); border-color: transparent; }
+  .badge.no-access { color: var(--danger); background: var(--danger-soft); border-color: transparent; }
+  .badge.pending { color: var(--warning); background: var(--warning-soft); border-color: transparent; }
+  .badge.done, .badge.notified { color: var(--text-muted); }
+  .badge.pii { color: var(--danger); background: var(--danger-soft); border-color: transparent; }
+
+  .result-panel {
+    background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg);
+    padding: 18px 20px; margin-top: 16px; box-shadow: var(--shadow);
+  }
+  .result-header { display: flex; align-items: center; justify-content: space-between; font-weight: 600; margin-bottom: 12px; }
+  .result-text { white-space: pre-wrap; line-height: 1.55; font-size: .9rem; }
+  .result-list { margin: 0; padding-left: 20px; font-size: .88rem; line-height: 1.6; }
+  .result-list li { margin-bottom: 10px; }
+
+  /* Folders tab */
+  .folder-form { display: flex; gap: 8px; margin-bottom: 18px; }
+  .folder-form input { flex: 1; }
+  .folder-row select { flex-shrink: 0; }
+
+  /* Reminders tab */
+  .reminder-form { display: flex; gap: 8px; margin-bottom: 14px; }
+  .reminder-form input { flex: 1; }
+  .checkbox-label { display: flex; align-items: center; gap: 6px; font-size: .84rem; color: var(--text-muted); margin-bottom: 14px; }
+  .reminder-actions { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
+
+  /* Toasts */
+  #toasts { position: fixed; bottom: 20px; right: 20px; display: flex; flex-direction: column; gap: 8px; z-index: 50; }
+  .toast {
+    background: var(--surface); border: 1px solid var(--border); color: var(--text);
+    border-radius: var(--radius); padding: 11px 16px; font-size: .84rem; box-shadow: var(--shadow);
+    opacity: 0; transform: translateY(8px); transition: opacity .2s, transform .2s; max-width: 340px;
+  }
+  .toast.show { opacity: 1; transform: translateY(0); }
+  .toast.success { border-left: 3px solid var(--success); }
+  .toast.error { border-left: 3px solid var(--danger); }
+  .toast.info { border-left: 3px solid var(--primary); }
+
+  @media (max-width: 760px) {
+    .app { flex-direction: column; }
+    .sidebar { width: 100%; height: auto; position: static; flex-direction: row; align-items: center; overflow-x: auto; }
+    nav { flex-direction: row; }
+    main { padding: 20px; }
+  }
+</style>
+</head>
+<body>
+
+<div class="app">
+  <aside class="sidebar">
+    <div class="brand"><span class="dot"></span> Vault Assistant</div>
+    <nav id="nav">
+      <button class="nav-item active" data-tab="ask"><span class="nav-icon">&#128172;</span> Ask</button>
+      <button class="nav-item" data-tab="documents"><span class="nav-icon">&#128196;</span> Documents</button>
+      <button class="nav-item" data-tab="folders"><span class="nav-icon">&#128193;</span> Folders &amp; Access</button>
+      <button class="nav-item" data-tab="reminders"><span class="nav-icon">&#9200;</span> Reminders</button>
+    </nav>
+    <div class="sidebar-footer">
+      <div class="status-pill" id="statusPill"><span class="status-dot" id="statusDot"></span><span id="statusText">checking…</span></div>
+      <button class="theme-toggle" id="themeToggle" type="button">Toggle theme</button>
+    </div>
+  </aside>
+
+  <main>
+    <section id="tab-ask" class="tab active">
+      <h1>Ask your documents</h1>
+      <p class="subtitle">Answers are grounded only in what's been ingested, with citations back to the source file.</p>
+      <div class="panel">
+        <form id="askForm" class="ask-form">
+          <textarea id="askInput" rows="2" placeholder="What did the March invoice say about payment terms?" required></textarea>
+          <button type="submit" class="btn primary" id="askBtn">Ask</button>
+        </form>
+      </div>
+      <div id="askHistory" class="ask-history"></div>
+    </section>
+
+    <section id="tab-documents" class="tab">
+      <div class="panel-header">
+        <div>
+          <h1>Documents</h1>
+          <p class="subtitle">Everything currently indexed. Select up to 3 to summarize, or 1 for actions / PII.</p>
+        </div>
+        <div class="header-actions">
+          <button class="btn" id="refreshDocsBtn">Refresh</button>
+        </div>
+      </div>
+      <div class="toolbar" id="docToolbar" hidden>
+        <span id="selectionCount">0 selected</span>
+        <select id="summarizeMode">
+          <option value="one_line">One line</option>
+          <option value="paragraph" selected>Paragraph</option>
+          <option value="bullets">Bullets</option>
+        </select>
+        <button class="btn primary" id="summarizeBtn">Summarize</button>
+        <button class="btn" id="actionsBtn">Extract actions</button>
+        <button class="btn" id="piiBtn">Scan PII</button>
+      </div>
+      <div id="docList" class="doc-list"></div>
+      <div id="resultPanel" class="result-panel" hidden></div>
+    </section>
+
+    <section id="tab-folders" class="tab">
+      <h1>Folders &amp; Access</h1>
+      <p class="subtitle">Control what the assistant may do with documents under each folder. Any folder without an
+        override here defaults to full <strong>edit</strong> access.</p>
+      <div class="panel">
+        <form id="addFolderForm" class="folder-form">
+          <input type="text" id="folderPath" placeholder="/Users/you/Documents/reports" required>
+          <select id="folderLevel">
+            <option value="edit">Edit — full access</option>
+            <option value="readonly">Read-only — query &amp; summarize only</option>
+            <option value="no_access">No access — fully excluded</option>
+          </select>
+          <button type="submit" class="btn primary">Add folder</button>
+        </form>
+      </div>
+      <div id="folderList" class="folder-list"></div>
+    </section>
+
+    <section id="tab-reminders" class="tab">
+      <h1>Reminders</h1>
+      <p class="subtitle">Local reminders parsed from natural language — nothing leaves this device.</p>
+      <div class="panel">
+        <form id="addReminderForm" class="reminder-form">
+          <input type="text" id="reminderText" placeholder="Call Sam next Friday at 3pm" required>
+          <button type="submit" class="btn primary">Add</button>
+        </form>
+        <label class="checkbox-label"><input type="checkbox" id="showDoneReminders"> show completed</label>
+      </div>
+      <div id="reminderList" class="reminder-list"></div>
+    </section>
+  </main>
+</div>
+
+<div id="toasts"></div>
+
+<script>
+'use strict';
+
+// ---------- helpers ----------
+
+function esc(s) {
+  return String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+async function api(path, opts = {}) {
+  const res = await fetch(path, {
+    method: opts.method || 'GET',
+    headers: opts.body ? { 'Content-Type': 'application/json' } : undefined,
+    body: opts.body ? JSON.stringify(opts.body) : undefined,
+  });
+  let data = null;
+  try { data = await res.json(); } catch { /* empty body */ }
+  if (!res.ok) {
+    let msg = res.statusText;
+    if (data && data.detail) {
+      msg = Array.isArray(data.detail) ? data.detail.map(d => d.msg).join('; ') : data.detail;
+    }
+    throw new Error(msg);
+  }
+  return data;
+}
+
+function toast(msg, kind = 'info', timeout = 4500) {
+  const el = document.createElement('div');
+  el.className = `toast ${kind}`;
+  el.textContent = msg;
+  document.getElementById('toasts').appendChild(el);
+  requestAnimationFrame(() => el.classList.add('show'));
+  setTimeout(() => {
+    el.classList.remove('show');
+    setTimeout(() => el.remove(), 250);
+  }, timeout);
+}
+
+function formatDate(iso) {
+  try {
+    return new Date(iso).toLocaleString(undefined, {
+      weekday: 'short', year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit',
+    });
+  } catch { return iso; }
+}
+
+const LEVEL_LABEL = { edit: ['edit', '&#9998; edit'], readonly: ['readonly', '&#128274; read-only'], no_access: ['no-access', '&#9940; no access'] };
+function levelBadge(level) {
+  const [cls, label] = LEVEL_LABEL[level] || ['edit', esc(level)];
+  return `<span class="badge ${cls}">${label}</span>`;
+}
+
+// ---------- theme ----------
+
+(function initTheme() {
+  const saved = localStorage.getItem('vault-theme');
+  if (saved) document.documentElement.setAttribute('data-theme', saved);
+  document.getElementById('themeToggle').addEventListener('click', () => {
+    const current = document.documentElement.getAttribute('data-theme')
+      || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+    const next = current === 'dark' ? 'light' : 'dark';
+    document.documentElement.setAttribute('data-theme', next);
+    localStorage.setItem('vault-theme', next);
+  });
+})();
+
+// ---------- nav ----------
+
+document.querySelectorAll('.nav-item').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.nav-item').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+    btn.classList.add('active');
+    document.getElementById('tab-' + btn.dataset.tab).classList.add('active');
+  });
+});
+
+// ---------- status ----------
+
+async function loadStatus() {
+  try {
+    const s = await api('/api/status');
+    const dot = document.getElementById('statusDot');
+    const text = document.getElementById('statusText');
+    dot.className = 'status-dot ' + (s.ollama_up ? 'up' : 'down');
+    text.textContent = s.ollama_up
+      ? `${s.documents} docs · ${s.chunks} chunks`
+      : 'Ollama unreachable';
+    if (s.missing_models && s.missing_models.length) {
+      text.textContent += ` · missing: ${s.missing_models.join(', ')}`;
+    }
+  } catch {
+    document.getElementById('statusDot').className = 'status-dot down';
+    document.getElementById('statusText').textContent = 'server unreachable';
+  }
+}
+
+// ---------- ask ----------
+
+document.getElementById('askForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const input = document.getElementById('askInput');
+  const btn = document.getElementById('askBtn');
+  const question = input.value.trim();
+  if (!question) return;
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span>Thinking…';
+  try {
+    const result = await api('/api/ask', { method: 'POST', body: { question } });
+    addTurn(question, result);
+    input.value = '';
+  } catch (err) {
+    toast(err.message, 'error');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Ask';
+  }
+});
+
+function addTurn(question, result) {
+  const history = document.getElementById('askHistory');
+  const notFound = /^not found in your documents/i.test(result.answer);
+  const sources = (result.sources || []).map(s =>
+    `<span class="source-chip">${esc(s.filename)}${s.page ? ` · p.${s.page}` : ''}</span>`
+  ).join('');
+  const turn = document.createElement('div');
+  turn.className = 'turn';
+  turn.innerHTML = `
+    <div class="question">${esc(question)}</div>
+    <div class="answer${notFound ? ' not-found' : ''}">${esc(result.answer)}</div>
+    ${sources ? `<div class="sources">${sources}</div>` : ''}
+  `;
+  history.insertBefore(turn, history.firstChild);
+}
+
+// ---------- documents ----------
+
+let selectedDocs = new Set();
+
+async function loadDocuments() {
+  try {
+    const docs = await api('/api/documents');
+    renderDocuments(docs);
+  } catch (err) {
+    toast(err.message, 'error');
+  }
+}
+
+function renderDocuments(docs) {
+  const list = document.getElementById('docList');
+  selectedDocs = new Set([...selectedDocs].filter(id => docs.some(d => d.id === id)));
+  if (!docs.length) {
+    list.innerHTML = `<div class="empty">No documents ingested yet. Add a folder under <strong>Folders &amp; Access</strong> to get started.</div>`;
+    updateDocToolbar();
+    return;
+  }
+  list.innerHTML = docs.map(d => `
+    <div class="doc-row" data-id="${d.id}">
+      <input type="checkbox" class="doc-check" id="doc-chk-${d.id}" value="${d.id}" ${selectedDocs.has(d.id) ? 'checked' : ''}>
+      <label for="doc-chk-${d.id}" class="doc-main">
+        <div class="doc-name">${esc(d.filename)}</div>
+        <div class="doc-meta">
+          ${d.status === 'ok' ? '<span class="badge ok">ok</span>' : `<span class="badge error" title="${esc(d.error || '')}">error</span>`}
+          <span class="muted">${d.chunk_count} chunks</span>
+          ${levelBadge(d.access_level)}
+        </div>
+      </label>
+      <button type="button" class="btn icon danger delete-doc" data-id="${d.id}"
+        ${d.access_level !== 'edit' ? 'disabled title="requires edit access"' : 'title="remove from index"'}>&#10005;</button>
+    </div>
+  `).join('');
+
+  list.querySelectorAll('.doc-check').forEach(cb => {
+    cb.addEventListener('change', () => {
+      const id = Number(cb.value);
+      if (cb.checked) selectedDocs.add(id); else selectedDocs.delete(id);
+      updateDocToolbar();
+    });
+  });
+  list.querySelectorAll('.delete-doc').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const id = Number(btn.dataset.id);
+      if (!confirm('Remove this document from the index? The source file on disk is untouched.')) return;
+      try {
+        await api(`/api/documents/${id}`, { method: 'DELETE' });
+        selectedDocs.delete(id);
+        toast('Document removed', 'success');
+        loadDocuments();
+        loadStatus();
+      } catch (err) { toast(err.message, 'error'); }
+    });
+  });
+  updateDocToolbar();
+}
+
+function updateDocToolbar() {
+  const n = selectedDocs.size;
+  document.getElementById('docToolbar').hidden = n === 0;
+  document.getElementById('selectionCount').textContent = `${n} selected`;
+  document.getElementById('summarizeBtn').disabled = !(n >= 1 && n <= 3);
+  document.getElementById('actionsBtn').disabled = n !== 1;
+  document.getElementById('piiBtn').disabled = n !== 1;
+}
+
+function renderResultShell(title, bodyHtml) {
+  const panel = document.getElementById('resultPanel');
+  panel.hidden = false;
+  panel.innerHTML = `<div class="result-header"><span>${esc(title)}</span><button type="button" class="btn icon" id="closeResult">&#10005;</button></div>${bodyHtml}`;
+  document.getElementById('closeResult').addEventListener('click', () => { panel.hidden = true; });
+}
+
+document.getElementById('summarizeBtn').addEventListener('click', async () => {
+  const mode = document.getElementById('summarizeMode').value;
+  const doc_ids = [...selectedDocs];
+  renderResultShell('Summarizing…', '<div class="spinner"></div>');
+  try {
+    const { summary } = await api('/api/summarize', { method: 'POST', body: { doc_ids, mode } });
+    renderResultShell('Summary', `<div class="result-text">${esc(summary)}</div>`);
+  } catch (err) {
+    document.getElementById('resultPanel').hidden = true;
+    toast(err.message, 'error');
+  }
+});
+
+document.getElementById('actionsBtn').addEventListener('click', async () => {
+  const [doc_id] = [...selectedDocs];
+  renderResultShell('Extracting action items…', '<div class="spinner"></div>');
+  try {
+    const { items } = await api('/api/actions', { method: 'POST', body: { doc_id } });
+    if (!items.length) { renderResultShell('Action items', '<div class="result-text muted">No action items found.</div>'); return; }
+    const html = items.map(i => `<li><strong>${esc(i.task)}</strong>${i.owner ? ` — ${esc(i.owner)}` : ''}${i.due_date ? ` (due ${esc(i.due_date)})` : ''}<div class="muted small">"${esc(i.source_snippet)}"</div></li>`).join('');
+    renderResultShell('Action items', `<ul class="result-list">${html}</ul>`);
+  } catch (err) {
+    document.getElementById('resultPanel').hidden = true;
+    toast(err.message, 'error');
+  }
+});
+
+document.getElementById('piiBtn').addEventListener('click', async () => {
+  const [doc_id] = [...selectedDocs];
+  renderResultShell('Scanning for PII…', '<div class="spinner"></div>');
+  try {
+    const { spans } = await api('/api/pii', { method: 'POST', body: { doc_id } });
+    if (!spans.length) { renderResultShell('PII scan', '<div class="result-text muted">No PII detected.</div>'); return; }
+    const html = spans.map(s => `<li><span class="badge pii">${esc(s.kind)}</span> ${esc(s.text)}</li>`).join('');
+    renderResultShell('PII scan', `<ul class="result-list">${html}</ul>`);
+  } catch (err) {
+    document.getElementById('resultPanel').hidden = true;
+    toast(err.message, 'error');
+  }
+});
+
+document.getElementById('refreshDocsBtn').addEventListener('click', loadDocuments);
+
+// ---------- folders ----------
+
+async function loadFolders() {
+  try {
+    const folders = await api('/api/folders');
+    renderFolders(folders);
+  } catch (err) {
+    toast(err.message, 'error');
+  }
+}
+
+function renderFolders(folders) {
+  const list = document.getElementById('folderList');
+  if (!folders.length) {
+    list.innerHTML = `<div class="empty">No folders configured yet — folders you add here get scanned and their access level enforced.</div>`;
+    return;
+  }
+  list.innerHTML = folders.map(f => `
+    <div class="folder-row" data-id="${f.id}">
+      <div class="folder-main">
+        <div class="folder-path">${esc(f.path)}</div>
+        <div class="muted small">${f.document_count} document${f.document_count === 1 ? '' : 's'}</div>
+      </div>
+      <select class="folder-level-select" data-id="${f.id}">
+        <option value="edit" ${f.access_level === 'edit' ? 'selected' : ''}>Edit</option>
+        <option value="readonly" ${f.access_level === 'readonly' ? 'selected' : ''}>Read-only</option>
+        <option value="no_access" ${f.access_level === 'no_access' ? 'selected' : ''}>No access</option>
+      </select>
+      <button type="button" class="btn rescan-folder" data-path="${esc(f.path)}">Rescan</button>
+      <button type="button" class="btn force-folder" data-path="${esc(f.path)}" ${f.access_level !== 'edit' ? 'disabled title="requires edit access"' : ''}>Force re-ingest</button>
+      <button type="button" class="btn icon danger remove-folder" data-id="${f.id}" title="remove override (keeps ingested documents)">&#10005;</button>
+    </div>
+  `).join('');
+
+  list.querySelectorAll('.folder-level-select').forEach(sel => {
+    sel.addEventListener('change', async () => {
+      const id = Number(sel.dataset.id);
+      try {
+        await api(`/api/folders/${id}`, { method: 'PUT', body: { access_level: sel.value } });
+        toast('Access level updated', 'success');
+        loadFolders();
+        loadDocuments();
+      } catch (err) {
+        toast(err.message, 'error');
+        loadFolders();
+      }
+    });
+  });
+  list.querySelectorAll('.rescan-folder').forEach(btn => {
+    btn.addEventListener('click', () => runIngest([btn.dataset.path], false));
+  });
+  list.querySelectorAll('.force-folder').forEach(btn => {
+    btn.addEventListener('click', () => {
+      if (confirm('Force re-ingest? This re-processes every file in this folder even if unchanged.')) {
+        runIngest([btn.dataset.path], true);
+      }
+    });
+  });
+  list.querySelectorAll('.remove-folder').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      if (!confirm("Remove this folder's access override? Already-ingested documents stay indexed with default edit access.")) return;
+      try {
+        await api(`/api/folders/${btn.dataset.id}`, { method: 'DELETE' });
+        toast('Folder override removed', 'success');
+        loadFolders();
+        loadDocuments();
+      } catch (err) { toast(err.message, 'error'); }
+    });
+  });
+}
+
+async function runIngest(paths, force) {
+  toast('Scanning…', 'info', 2000);
+  try {
+    const r = await api('/api/ingest', { method: 'POST', body: { paths, force } });
+    const parts = [`${r.added} added`, `${r.updated} updated`, `${r.removed} removed`];
+    if (r.blocked) parts.push(`${r.blocked} blocked`);
+    if (r.failed.length) parts.push(`${r.failed.length} failed`);
+    toast(parts.join(', '), r.failed.length ? 'error' : 'success', 6000);
+    loadDocuments();
+    loadFolders();
+    loadStatus();
+  } catch (err) {
+    toast(err.message, 'error');
+  }
+}
+
+document.getElementById('addFolderForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const pathInput = document.getElementById('folderPath');
+  const path = pathInput.value.trim();
+  const level = document.getElementById('folderLevel').value;
+  if (!path) return;
+  try {
+    await api('/api/folders', { method: 'POST', body: { path, access_level: level } });
+    toast('Folder registered', 'success');
+    pathInput.value = '';
+    loadFolders();
+    if (level !== 'no_access') {
+      runIngest([path], false);
+    } else {
+      loadDocuments();
+    }
+  } catch (err) {
+    toast(err.message, 'error');
+  }
+});
+
+// ---------- reminders ----------
+
+async function loadReminders() {
+  try {
+    const includeDone = document.getElementById('showDoneReminders').checked;
+    const items = await api(`/api/reminders?include_done=${includeDone}`);
+    renderReminders(items);
+  } catch (err) {
+    toast(err.message, 'error');
+  }
+}
+
+function renderReminders(items) {
+  const list = document.getElementById('reminderList');
+  if (!items.length) {
+    list.innerHTML = `<div class="empty">No reminders yet.</div>`;
+    return;
+  }
+  list.innerHTML = items.map(r => `
+    <div class="reminder-row" data-id="${r.id}">
+      <div class="folder-main">
+        <div class="reminder-title">${esc(r.title)}</div>
+        <div class="muted small">${esc(formatDate(r.due_at))}</div>
+      </div>
+      <div class="reminder-actions">
+        <span class="badge ${esc(r.status)}">${esc(r.status)}</span>
+        ${r.status === 'pending' ? `<button type="button" class="btn done-reminder" data-id="${r.id}">Mark done</button>` : ''}
+      </div>
+    </div>
+  `).join('');
+  list.querySelectorAll('.done-reminder').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      try {
+        await api(`/api/reminders/${btn.dataset.id}/done`, { method: 'POST' });
+        loadReminders();
+      } catch (err) { toast(err.message, 'error'); }
+    });
+  });
+}
+
+document.getElementById('addReminderForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const input = document.getElementById('reminderText');
+  const text = input.value.trim();
+  if (!text) return;
+  try {
+    await api('/api/reminders', { method: 'POST', body: { text } });
+    input.value = '';
+    toast('Reminder created', 'success');
+    loadReminders();
+  } catch (err) {
+    toast(err.message, 'error');
+  }
+});
+
+document.getElementById('showDoneReminders').addEventListener('change', loadReminders);
+
+// ---------- init ----------
+
+loadStatus();
+loadDocuments();
+loadFolders();
+loadReminders();
+setInterval(loadStatus, 15000);
+</script>
+</body>
+</html>

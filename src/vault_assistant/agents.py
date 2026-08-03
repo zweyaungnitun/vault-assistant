@@ -25,6 +25,7 @@ from typing import Any
 
 from . import db, qa
 from .config import Config
+from .observability import observe, update_current_span
 from .ollama_client import OllamaClient, OllamaError
 from .retrieval import RetrievedChunk, hybrid_search
 from .vectors import VectorIndex
@@ -145,10 +146,12 @@ def _needs_decomposition(question: str, cfg: Config) -> bool:
     return any(conj in lowered for conj in cfg.agentic_conjunctions)
 
 
+@observe(name="agents.decompose", as_type="chain", capture_input=False, capture_output=False)
 def _decompose(client: OllamaClient, question: str, cfg: Config) -> list[SubQuery]:
+    update_current_span(input={"question": question})
     system = DECOMPOSE_SYSTEM_PROMPT.format(max_subqueries=cfg.agentic_max_subqueries)
     try:
-        result = client.chat_json(system, f"Question: {question}", DECOMPOSE_SCHEMA)
+        result = client.chat_json(system, f"Question: {question}", DECOMPOSE_SCHEMA, trace_name="decompose")
     except OllamaError as exc:
         logger.warning("decomposition failed, using single implicit sub-query: %s", exc)
         return [SubQuery(question, question, [])]
@@ -165,7 +168,9 @@ def _decompose(client: OllamaClient, question: str, cfg: Config) -> list[SubQuer
         sub_queries.append(SubQuery(question=q, search_query=sq, key_terms=terms[:5]))
         if len(sub_queries) >= cfg.agentic_max_subqueries:
             break
-    return sub_queries or [SubQuery(question, question, [])]
+    sub_queries = sub_queries or [SubQuery(question, question, [])]
+    update_current_span(output={"sub_queries": [s.question for s in sub_queries]})
+    return sub_queries
 
 
 def _merge_candidates(
@@ -231,6 +236,7 @@ def _kb_candidates(
     return candidates
 
 
+@observe(name="agents.retrieve", as_type="retriever", capture_input=False, capture_output=False)
 def _retrieve_pool(
     conn: Connection,
     index: VectorIndex,
@@ -239,6 +245,7 @@ def _retrieve_pool(
     cfg: Config,
     knowledge_base: Any,
 ) -> list[RetrievedChunk]:
+    update_current_span(input={"search_queries": [sq.search_query for sq in sub_queries]})
     hits_per_subquery = [
         hybrid_search(
             conn,
@@ -254,9 +261,11 @@ def _retrieve_pool(
     pool = _merge_candidates(hits_per_subquery, cfg.agentic_max_candidates)
     if knowledge_base is not None:
         pool = pool + _kb_candidates(knowledge_base, sub_queries, cfg, {c.chunk_id for c in pool})
+    update_current_span(output={"candidates": len(pool)})
     return pool
 
 
+@observe(name="agents.synthesize", as_type="tool", capture_input=False, capture_output=False)
 def _synthesize(
     client: OllamaClient,
     question: str,
@@ -265,6 +274,7 @@ def _synthesize(
     cfg: Config,
 ) -> tuple[list[RetrievedChunk], dict[int, float]]:
     """One call scores ALL candidates at once — never one call per chunk."""
+    update_current_span(input={"candidates": len(pool)})
     excerpts = [
         f"[{i + 1}] ({c.filename}) {c.text[: cfg.agentic_excerpt_chars]}" for i, c in enumerate(pool)
     ]
@@ -272,7 +282,7 @@ def _synthesize(
     user = f"Question(s):\n{questions_block}\n\nExcerpts:\n" + "\n".join(excerpts)
 
     try:
-        result = client.chat_json(SYNTHESIZE_SYSTEM_PROMPT, user, SYNTHESIZE_SCHEMA)
+        result = client.chat_json(SYNTHESIZE_SYSTEM_PROMPT, user, SYNTHESIZE_SCHEMA, trace_name="synthesize")
     except OllamaError as exc:
         logger.warning("evidence synthesis failed, using unranked retrieval order: %s", exc)
         return pool[: cfg.agentic_evidence_top_n], {}
@@ -295,17 +305,21 @@ def _synthesize(
         # score rather than starving the generator — its own NOT_FOUND rule is
         # the real backstop against a bad answer.
         filtered = pool[:3]
-    return filtered[: cfg.agentic_evidence_top_n], relevance
+    filtered = filtered[: cfg.agentic_evidence_top_n]
+    update_current_span(output={"filtered": len(filtered)})
+    return filtered, relevance
 
 
+@observe(name="agents.verify", as_type="evaluator", capture_input=False, capture_output=False)
 def _verify(
     client: OllamaClient, question: str, answer: str, context: str, cfg: Config
 ) -> VerificationResult | None:
     if not cfg.agentic_verify:
         return None
+    update_current_span(input={"question": question, "answer": answer})
     user = f"Question: {question}\n\nAnswer given: {answer}\n\nExcerpts used:\n{context}"
     try:
-        result = client.chat_json(VERIFY_SYSTEM_PROMPT, user, VERIFY_SCHEMA)
+        result = client.chat_json(VERIFY_SYSTEM_PROMPT, user, VERIFY_SCHEMA, trace_name="verify")
     except OllamaError as exc:
         logger.warning("verification failed, returning answer unverified: %s", exc)
         return None
@@ -318,7 +332,11 @@ def _verify(
     is_complete = bool(result.get("is_complete", True))
     raw_gaps = result.get("gaps")
     gaps = [str(g).strip() for g in raw_gaps if str(g).strip()][:5] if isinstance(raw_gaps, list) else []
-    return VerificationResult(confidence=confidence, is_complete=is_complete, gaps=gaps)
+    verification = VerificationResult(confidence=confidence, is_complete=is_complete, gaps=gaps)
+    update_current_span(
+        output={"confidence": confidence, "is_complete": is_complete, "gaps": gaps},
+    )
+    return verification
 
 
 def _finalize(cache: Any, memory: Any, cfg: Config, generation: int, question: str, result: AgenticQAResult) -> None:
@@ -333,8 +351,18 @@ def _finalize(cache: Any, memory: Any, cfg: Config, generation: int, question: s
             ttl=cfg.cache_default_ttl,
             generation=generation,
         )
+    update_current_span(
+        output={
+            "answer": result.answer,
+            "pipeline": result.pipeline,
+            "sources": len(result.sources),
+            "evidence_confidence": result.evidence_confidence,
+            "verification": result.verification.to_dict() if result.verification else None,
+        }
+    )
 
 
+@observe(name="agentic_qa", as_type="agent", capture_input=False, capture_output=False)
 def answer_question_agentic(
     conn: Connection,
     index: VectorIndex,
@@ -346,11 +374,13 @@ def answer_question_agentic(
     memory: Any = None,
     knowledge_base: Any = None,
 ) -> AgenticQAResult:
+    update_current_span(input={"question": question})
     generation = db.get_generation(conn)
 
     if cache is not None:
         hit = cache.get(question, generation=generation)
         if hit is not None:
+            update_current_span(output={"answer": hit.answer, "pipeline": "cached"})
             return AgenticQAResult(
                 answer=hit.answer,
                 sources=[qa.Source(**s) for s in hit.sources],
@@ -390,7 +420,7 @@ def answer_question_agentic(
     context = "\n\n".join(qa.context_block(i + 1, c) for i, c in enumerate(included))
     prefix = f"{memory_ctx}\n\n" if memory_ctx else ""
     user = f"{prefix}Context excerpts:\n\n{context}\n\nQuestion: {question}"
-    answer = client.chat(qa.SYSTEM_PROMPT, user, temperature=0.2)
+    answer = client.chat(qa.SYSTEM_PROMPT, user, temperature=0.2, trace_name="answer")
 
     if answer.startswith(qa.NOT_FOUND):
         result = AgenticQAResult(qa.NOT_FOUND, [], included, sub_queries, None, None, "full")

@@ -13,6 +13,8 @@ import logging
 
 import httpx
 
+from .observability import observe, update_current_generation
+
 logger = logging.getLogger("vault.ollama")
 
 DOC_PREFIX = "search_document: "
@@ -70,8 +72,10 @@ class OllamaClient:
 
         return [m for m in (self.gen_model, self.embed_model) if not present(m)]
 
+    @observe(name="ollama.embed", as_type="embedding", capture_input=False, capture_output=False)
     def embed(self, texts: list[str]) -> list[list[float]]:
         """Embed texts (callers attach DOC_PREFIX/QUERY_PREFIX as appropriate)."""
+        update_current_generation(model=self.embed_model, input={"count": len(texts)})
         out: list[list[float]] = []
         for i in range(0, len(texts), EMBED_BATCH_SIZE):
             batch = texts[i : i + EMBED_BATCH_SIZE]
@@ -82,8 +86,10 @@ class OllamaClient:
             if not embeddings or len(embeddings) != len(batch):
                 raise OllamaError("embed returned wrong number of vectors")
             out.extend(embeddings)
+        update_current_generation(output={"count": len(out)})
         return out
 
+    @observe(name="ollama.chat", as_type="generation", capture_input=False, capture_output=False)
     def chat(
         self,
         system: str,
@@ -91,7 +97,17 @@ class OllamaClient:
         temperature: float = 0.2,
         format: dict | None = None,
         num_ctx: int | None = None,
+        trace_name: str | None = None,
     ) -> str:
+        gen_kwargs: dict = {
+            "model": self.gen_model,
+            "input": [{"role": "system", "content": system}, {"role": "user", "content": user}],
+            "model_parameters": {"temperature": temperature, "num_ctx": num_ctx or self.num_ctx},
+        }
+        if trace_name:
+            gen_kwargs["name"] = f"ollama.chat:{trace_name}"
+        update_current_generation(**gen_kwargs)
+
         payload: dict = {
             "model": self.gen_model,
             "messages": [
@@ -116,13 +132,20 @@ class OllamaClient:
             resp = self._http.post("/api/chat", json=payload)
         if resp.status_code != 200:
             raise OllamaError(f"chat failed ({resp.status_code}): {resp.text[:200]}")
-        content = resp.json().get("message", {}).get("content", "")
-        return content.strip()
+        data = resp.json()
+        content = data.get("message", {}).get("content", "").strip()
+        update_current_generation(
+            output=content,
+            usage_details={"input": data.get("prompt_eval_count", 0), "output": data.get("eval_count", 0)},
+        )
+        return content
 
-    def chat_json(self, system: str, user: str, schema: dict, temperature: float = 0.1):
+    def chat_json(
+        self, system: str, user: str, schema: dict, temperature: float = 0.1, trace_name: str | None = None
+    ):
         """Chat with a JSON-schema-constrained response; retries once on bad JSON."""
         for attempt in (1, 2):
-            raw = self.chat(system, user, temperature=temperature, format=schema)
+            raw = self.chat(system, user, temperature=temperature, format=schema, trace_name=trace_name)
             try:
                 return json.loads(raw)
             except json.JSONDecodeError:

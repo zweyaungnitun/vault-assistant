@@ -56,6 +56,12 @@ class Config:
     memory_top_k_facts: int = 5
     kb_find_related_limit: int = 50
 
+    # Optional Langfuse tracing (observability.py). Off by default to preserve
+    # the no-telemetry default above; enabling it still requires
+    # LANGFUSE_PUBLIC_KEY/LANGFUSE_SECRET_KEY in the environment.
+    langfuse_enabled: bool = False
+    langfuse_host: str = "http://localhost:3000"
+
     @property
     def db_path(self) -> Path:
         return self.data_dir / "vault.db"
@@ -98,6 +104,8 @@ def load_config(config_file: Path | None = None) -> Config:
             "memory_context_budget",
             "memory_top_k_facts",
             "kb_find_related_limit",
+            "langfuse_enabled",
+            "langfuse_host",
         ):
             if key in raw:
                 setattr(cfg, key, raw[key])
