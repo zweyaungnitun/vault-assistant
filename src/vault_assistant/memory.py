@@ -22,7 +22,7 @@ from datetime import datetime
 from sqlite3 import Connection
 
 from .chunking import approx_tokens
-from .ollama_client import OllamaClient
+from .providers import LLMClient
 
 _TOKEN_RE = re.compile(r"\w+")
 
@@ -510,7 +510,7 @@ def find_related(conn: Connection, entity: str, depth: int = 2, limit: int = 50)
     return sorted(facts_by_id.values(), key=lambda f: -f.confidence)[:limit]
 
 
-def extract_facts_from_text(conn: Connection, client: OllamaClient, text: str, source: str | None = None) -> list[Fact]:
+def extract_facts_from_text(conn: Connection, client: LLMClient, text: str, source: str | None = None) -> list[Fact]:
     result = client.chat_json(FACT_SYSTEM_PROMPT, f"Extract facts from:\n\n{text}", FACT_SCHEMA)
     out: list[Fact] = []
     for raw in result.get("facts", []):
@@ -568,7 +568,7 @@ class KnowledgeBase:
     def find_related(self, entity: str, depth: int = 2, limit: int | None = None) -> list[Fact]:
         return find_related(self.conn, entity, depth, limit if limit is not None else self.find_related_limit)
 
-    def extract_facts_from_text(self, client: OllamaClient, text: str, source: str | None = None) -> list[Fact]:
+    def extract_facts_from_text(self, client: LLMClient, text: str, source: str | None = None) -> list[Fact]:
         return extract_facts_from_text(self.conn, client, text, source)
 
     def clear(self) -> None:

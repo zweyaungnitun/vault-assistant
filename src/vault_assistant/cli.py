@@ -14,21 +14,31 @@ from .config import load_config, setup_logging
 from .extractors import extract
 from .ingest import ingest_paths
 from .observability import init_observability
-from .ollama_client import OllamaClient
 from .pii import scan as pii_scan
+from .providers import PROVIDERS, ProviderError, UnavailableClient, build_client
 from .qa import answer_question
 from .vectors import VectorIndex
 
 
-def _context(need_ollama: bool = True):
+def _context(need_backend: bool = True):
     cfg = load_config()
     setup_logging(cfg)
     init_observability(cfg)
     conn = db.connect(cfg.db_path)
-    client = OllamaClient.from_config(cfg)
-    if need_ollama:
+    try:
+        client = build_client(cfg)
+    except ProviderError as exc:
+        if need_backend:
+            sys.exit(f"error: {exc}")
+        client = UnavailableClient(str(exc))
+    if need_backend:
         if not client.is_up():
-            sys.exit(f"error: Ollama is not reachable at {cfg.ollama_url} — start it with 'ollama serve'")
+            hint = (
+                f"start it with 'ollama serve' (url: {cfg.ollama_url})"
+                if cfg.provider == "ollama"
+                else "check its API key/network reachability"
+            )
+            sys.exit(f"error: {cfg.provider} backend is not reachable — {hint}")
         missing = client.missing_models()
         if missing:
             sys.exit(
@@ -51,10 +61,13 @@ def _read_input(args) -> str:
 
 
 def cmd_status(args) -> None:
-    cfg, conn, client = _context(need_ollama=False)
+    cfg, conn, client = _context(need_backend=False)
     up = client.is_up()
+    embed_provider = cfg.embed_provider or cfg.provider
+    provider_desc = cfg.provider if embed_provider == cfg.provider else f"{cfg.provider} (embed: {embed_provider})"
     print(f"data dir:   {cfg.data_dir}")
-    print(f"ollama:     {'up' if up else 'DOWN'} ({cfg.ollama_url})")
+    print(f"provider:   {provider_desc}")
+    print(f"backend:    {'up' if up else 'DOWN'}" + (f" ({cfg.ollama_url})" if cfg.provider == "ollama" else ""))
     if up:
         missing = client.missing_models()
         print(f"models:     {cfg.gen_model}, {cfg.embed_model}"
@@ -135,7 +148,7 @@ def cmd_actions(args) -> None:
 
 
 def cmd_pii(args) -> None:
-    _, _, client = _context(need_ollama=not args.no_model)
+    _, _, client = _context(need_backend=not args.no_model)
     text = _read_input(args)
     spans = pii_scan(text, client=None if args.no_model else client, use_model=not args.no_model)
     if args.json:
@@ -149,7 +162,7 @@ def cmd_pii(args) -> None:
 
 
 def cmd_remind(args) -> None:
-    _, conn, client = _context(need_ollama=False)
+    _, conn, client = _context(need_backend=False)
     llm = client if client.is_up() else None
     try:
         r = reminders.create_from_text(conn, args.text, client=llm)
@@ -159,7 +172,7 @@ def cmd_remind(args) -> None:
 
 
 def cmd_reminders(args) -> None:
-    _, conn, _ = _context(need_ollama=False)
+    _, conn, _ = _context(need_backend=False)
     if args.done:
         reminders.set_status(conn, args.done, "done")
         print(f"reminder #{args.done} marked done")
@@ -172,8 +185,38 @@ def cmd_reminders(args) -> None:
         print(f"#{r.id:<4} [{r.status:8}] {r.due_at:%a %Y-%m-%d %H:%M}  {r.title}")
 
 
+def cmd_models(args) -> None:
+    cfg, conn, client = _context(need_backend=False)
+    provider = args.provider or cfg.provider
+    if args.provider and args.provider != cfg.provider:
+        # Preview another provider without switching config.toml.
+        from dataclasses import replace
+
+        try:
+            client = build_client(replace(cfg, provider=provider, embed_provider=provider))
+        except ProviderError as exc:
+            sys.exit(f"error: {exc}")
+    try:
+        available = client.list_models()
+    except Exception as exc:  # noqa: BLE001 — surface any backend failure, not just ProviderError
+        sys.exit(f"error: could not list models for provider '{provider}': {exc}")
+    configured = {cfg.gen_model, cfg.embed_model} if provider == cfg.provider else set()
+
+    def is_configured(name: str) -> bool:
+        return any(name == c or name.split(":")[0] == c for c in configured)
+
+    print(f"provider: {provider}"
+          + (f"  (configured gen_model={cfg.gen_model}, embed_model={cfg.embed_model})" if configured else ""))
+    if not available:
+        print("no models reported by the backend")
+        return
+    for m in available:
+        print(f"  {m}" + (" *" if is_configured(m) else ""))
+    print("\nset gen_model / embed_model / provider in ~/.vault-assistant/config.toml to switch")
+
+
 def cmd_docs(args) -> None:
-    _, conn, _ = _context(need_ollama=False)
+    _, conn, _ = _context(need_backend=False)
     docs = db.list_documents(conn)
     if not docs:
         print("no documents ingested")
@@ -184,7 +227,7 @@ def cmd_docs(args) -> None:
 
 
 def cmd_folders(args) -> None:
-    _, conn, _ = _context(need_ollama=False)
+    _, conn, _ = _context(need_backend=False)
     if args.remove is not None:
         try:
             permissions.remove_folder(conn, args.remove)
@@ -267,6 +310,12 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("--all", action="store_true", help="include done")
     p.add_argument("--done", type=int, metavar="ID", help="mark reminder done")
     p.set_defaults(func=cmd_reminders)
+
+    p = sub.add_parser("models", help="list available models for the configured (or a given) provider")
+    p.add_argument(
+        "--provider", choices=PROVIDERS, help="preview another provider's models without changing config.toml"
+    )
+    p.set_defaults(func=cmd_models)
 
     sub.add_parser("docs", help="list ingested documents").set_defaults(func=cmd_docs)
 

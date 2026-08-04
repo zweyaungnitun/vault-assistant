@@ -14,6 +14,7 @@ import logging
 import httpx
 
 from .observability import observe, update_current_generation
+from .providers import ProviderError
 
 logger = logging.getLogger("vault.ollama")
 
@@ -23,7 +24,7 @@ QUERY_PREFIX = "search_query: "
 EMBED_BATCH_SIZE = 32
 
 
-class OllamaError(Exception):
+class OllamaError(ProviderError):
     pass
 
 
@@ -40,6 +41,9 @@ class OllamaClient:
         self.gen_model = gen_model
         self.embed_model = embed_model
         self.num_ctx = num_ctx
+        self.embed_provider_name = "ollama"
+        self.doc_prefix = DOC_PREFIX
+        self.query_prefix = QUERY_PREFIX
         self._http = httpx.Client(base_url=self.base_url, timeout=timeout)
         self._supports_think = True
 

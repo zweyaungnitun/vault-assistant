@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass
 
-from .ollama_client import OllamaClient
+from .providers import LLMClient
 
 SCHEMA = {
     "type": "object",
@@ -50,7 +50,7 @@ class ActionItem:
         return asdict(self)
 
 
-def extract_actions(client: OllamaClient, text: str) -> list[ActionItem]:
+def extract_actions(client: LLMClient, text: str) -> list[ActionItem]:
     result = client.chat_json(SYSTEM_PROMPT, f"Extract action items from:\n\n{text}", SCHEMA)
     items = []
     for raw in result.get("items", []):

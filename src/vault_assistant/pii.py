@@ -13,7 +13,7 @@ import logging
 import re
 from dataclasses import asdict, dataclass
 
-from .ollama_client import OllamaClient, OllamaError
+from .providers import LLMClient, ProviderError
 
 logger = logging.getLogger("vault.pii")
 
@@ -86,7 +86,7 @@ def locate_all(text: str, needle: str) -> list[tuple[int, int]]:
     return out
 
 
-def model_scan(client: OllamaClient, text: str) -> list[PIISpan]:
+def model_scan(client: LLMClient, text: str) -> list[PIISpan]:
     result = client.chat_json(MODEL_SYSTEM_PROMPT, f"Find all PII in:\n\n{text}", MODEL_SCHEMA)
     spans: list[PIISpan] = []
     for item in result.get("items", []):
@@ -106,12 +106,12 @@ def _merge(spans: list[PIISpan]) -> list[PIISpan]:
     return out
 
 
-def scan(text: str, client: OllamaClient | None = None, use_model: bool = True) -> list[PIISpan]:
+def scan(text: str, client: LLMClient | None = None, use_model: bool = True) -> list[PIISpan]:
     spans = regex_scan(text)
     if use_model and client is not None:
         try:
             spans = _merge(spans + model_scan(client, text))
-        except OllamaError as exc:
+        except ProviderError as exc:
             # Recall-first: regex results are still returned, but the caller
             # should know the deeper pass failed.
             logger.warning("model-assisted PII pass failed, regex-only results: %s", exc)

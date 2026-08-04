@@ -10,7 +10,7 @@ from __future__ import annotations
 from sqlite3 import Connection
 
 from .chunking import approx_tokens, chunk_text
-from .ollama_client import OllamaClient
+from .providers import LLMClient
 
 MODES = ("one_line", "paragraph", "bullets")
 
@@ -48,7 +48,7 @@ def document_text(conn: Connection, doc_id: int) -> str:
     return "".join(parts)
 
 
-def summarize_text(client: OllamaClient, text: str, mode: str = "paragraph") -> str:
+def summarize_text(client: LLMClient, text: str, mode: str = "paragraph") -> str:
     if mode not in MODES:
         raise ValueError(f"unknown mode {mode!r}; expected one of {MODES}")
     instruction = _MODE_INSTRUCTIONS[mode]
@@ -78,7 +78,7 @@ def summarize_text(client: OllamaClient, text: str, mode: str = "paragraph") -> 
 
 def summarize_documents(
     conn: Connection,
-    client: OllamaClient,
+    client: LLMClient,
     doc_ids: list[int],
     mode: str = "paragraph",
 ) -> str:

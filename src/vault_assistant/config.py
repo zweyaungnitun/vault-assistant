@@ -2,7 +2,9 @@
 
 All data lives under ``data_dir`` (default ``~/.vault-assistant``): the SQLite
 database, logs, and an optional ``config.toml`` overriding any field below.
-No telemetry, no network access other than the local Ollama endpoint.
+No telemetry. Network access is limited to whatever ``provider``/
+``embed_provider`` you configure (see providers.py) — the default,
+``"ollama"``, keeps everything local.
 """
 
 from __future__ import annotations
@@ -24,6 +26,17 @@ class Config:
     ollama_url: str = "http://localhost:11434"
     gen_model: str = "qwen3:8b"
     embed_model: str = "nomic-embed-text"
+
+    # LLM provider selection (providers.py). "ollama" (default) keeps
+    # everything local; other values require the matching API key in the
+    # environment (never in this file — see providers.py's module docstring)
+    # and, for anthropic/gemini, an optional dependency extra. embed_provider
+    # defaults to provider when empty; it must differ when provider is
+    # "anthropic" (Claude has no embeddings API).
+    provider: str = "ollama"
+    embed_provider: str = ""
+    api_base_url: str = ""
+
     watch_folders: list[Path] = field(default_factory=list)
     chunk_target_tokens: int = 400
     chunk_overlap_ratio: float = 0.15
@@ -80,6 +93,9 @@ def load_config(config_file: Path | None = None) -> Config:
             "ollama_url",
             "gen_model",
             "embed_model",
+            "provider",
+            "embed_provider",
+            "api_base_url",
             "chunk_target_tokens",
             "chunk_overlap_ratio",
             "vector_top_k",

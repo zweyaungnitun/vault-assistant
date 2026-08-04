@@ -17,7 +17,7 @@ from sqlite3 import Connection
 import dateparser
 from dateparser.search import search_dates
 
-from .ollama_client import OllamaClient, OllamaError
+from .providers import LLMClient, ProviderError
 
 DEFAULT_HOUR = 9  # date-only phrases ("tomorrow", "next Friday") land at 09:00
 
@@ -81,7 +81,7 @@ def _normalize_due(parsed: datetime, phrase: str, now: datetime) -> datetime:
 def parse_reminder(
     text: str,
     now: datetime | None = None,
-    client: OllamaClient | None = None,
+    client: LLMClient | None = None,
 ) -> tuple[str, datetime]:
     """Return (title, due_at). Deterministic path first; LLM fallback only to
     split title from time phrase in unusual phrasings."""
@@ -105,7 +105,7 @@ def parse_reminder(
     if client is not None:
         try:
             result = client.chat_json(EXTRACT_SYSTEM_PROMPT, f"Reminder request: {text}", EXTRACT_SCHEMA)
-        except OllamaError:
+        except ProviderError:
             result = {}
         title = (result.get("title") or "").strip() or body
         phrase = result.get("when_phrase")
@@ -139,7 +139,7 @@ def create_reminder(
 def create_from_text(
     conn: Connection,
     text: str,
-    client: OllamaClient | None = None,
+    client: LLMClient | None = None,
     now: datetime | None = None,
 ) -> Reminder:
     title, due_at = parse_reminder(text, now=now, client=client)

@@ -22,8 +22,8 @@ import numpy as np
 from .chunking import chunk_text
 from .db import bump_generation, get_meta, set_meta
 from .extractors import SUPPORTED_EXTENSIONS, ExtractionError, extract
-from .ollama_client import DOC_PREFIX, OllamaClient
 from .permissions import resolve_access_level
+from .providers import LLMClient
 
 logger = logging.getLogger("vault.ingest")
 
@@ -63,24 +63,28 @@ def iter_files(paths: list[Path]) -> list[Path]:
     return files
 
 
-def _verify_embedding_meta(conn: Connection, client: OllamaClient, dim: int) -> None:
+def _verify_embedding_meta(conn: Connection, client: LLMClient, dim: int) -> None:
     stored_model = get_meta(conn, "embedding_model")
     stored_dim = get_meta(conn, "embedding_dim")
+    stored_provider = get_meta(conn, "embedding_provider") or ""
+    current_provider = getattr(client, "embed_provider_name", "")
     if stored_model is None:
         set_meta(conn, "embedding_model", client.embed_model)
         set_meta(conn, "embedding_dim", str(dim))
+        set_meta(conn, "embedding_provider", current_provider)
         return
-    if stored_model != client.embed_model or int(stored_dim or 0) != dim:
+    if stored_model != client.embed_model or int(stored_dim or 0) != dim or stored_provider != current_provider:
         raise RuntimeError(
-            f"embedding model mismatch: database was built with {stored_model} "
-            f"(dim {stored_dim}), current config uses {client.embed_model} (dim {dim}). "
-            "Re-ingest from scratch with a fresh database, or restore the original model."
+            f"embedding model mismatch: database was built with {stored_provider or 'unknown provider'}/"
+            f"{stored_model} (dim {stored_dim}), current config uses {current_provider}/{client.embed_model} "
+            f"(dim {dim}). Re-ingest from scratch with a fresh database, or restore the original "
+            "provider/model."
         )
 
 
 def ingest_paths(
     conn: Connection,
-    client: OllamaClient,
+    client: LLMClient,
     paths: list[Path],
     force: bool = False,
     prune: bool = True,
@@ -164,7 +168,7 @@ def _upsert_document(
 
 def _ingest_file(
     conn: Connection,
-    client: OllamaClient,
+    client: LLMClient,
     path: Path,
     force: bool,
     report: IngestReport,
@@ -198,7 +202,7 @@ def _ingest_file(
     if not chunks:
         raise ExtractionError(f"{path.name}: no content after chunking")
 
-    vectors = client.embed([DOC_PREFIX + c.text for c in chunks])
+    vectors = client.embed([client.doc_prefix + c.text for c in chunks])
     dim = len(vectors[0])
     _verify_embedding_meta(conn, client, dim)
 

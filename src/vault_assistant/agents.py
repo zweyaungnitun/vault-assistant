@@ -26,7 +26,7 @@ from typing import Any
 from . import db, qa
 from .config import Config
 from .observability import observe, update_current_span
-from .ollama_client import OllamaClient, OllamaError
+from .providers import LLMClient, ProviderError
 from .retrieval import RetrievedChunk, hybrid_search
 from .vectors import VectorIndex
 
@@ -147,12 +147,12 @@ def _needs_decomposition(question: str, cfg: Config) -> bool:
 
 
 @observe(name="agents.decompose", as_type="chain", capture_input=False, capture_output=False)
-def _decompose(client: OllamaClient, question: str, cfg: Config) -> list[SubQuery]:
+def _decompose(client: LLMClient, question: str, cfg: Config) -> list[SubQuery]:
     update_current_span(input={"question": question})
     system = DECOMPOSE_SYSTEM_PROMPT.format(max_subqueries=cfg.agentic_max_subqueries)
     try:
         result = client.chat_json(system, f"Question: {question}", DECOMPOSE_SCHEMA, trace_name="decompose")
-    except OllamaError as exc:
+    except ProviderError as exc:
         logger.warning("decomposition failed, using single implicit sub-query: %s", exc)
         return [SubQuery(question, question, [])]
 
@@ -240,7 +240,7 @@ def _kb_candidates(
 def _retrieve_pool(
     conn: Connection,
     index: VectorIndex,
-    client: OllamaClient,
+    client: LLMClient,
     sub_queries: list[SubQuery],
     cfg: Config,
     knowledge_base: Any,
@@ -267,7 +267,7 @@ def _retrieve_pool(
 
 @observe(name="agents.synthesize", as_type="tool", capture_input=False, capture_output=False)
 def _synthesize(
-    client: OllamaClient,
+    client: LLMClient,
     question: str,
     sub_queries: list[SubQuery],
     pool: list[RetrievedChunk],
@@ -283,7 +283,7 @@ def _synthesize(
 
     try:
         result = client.chat_json(SYNTHESIZE_SYSTEM_PROMPT, user, SYNTHESIZE_SCHEMA, trace_name="synthesize")
-    except OllamaError as exc:
+    except ProviderError as exc:
         logger.warning("evidence synthesis failed, using unranked retrieval order: %s", exc)
         return pool[: cfg.agentic_evidence_top_n], {}
 
@@ -312,7 +312,7 @@ def _synthesize(
 
 @observe(name="agents.verify", as_type="evaluator", capture_input=False, capture_output=False)
 def _verify(
-    client: OllamaClient, question: str, answer: str, context: str, cfg: Config
+    client: LLMClient, question: str, answer: str, context: str, cfg: Config
 ) -> VerificationResult | None:
     if not cfg.agentic_verify:
         return None
@@ -320,7 +320,7 @@ def _verify(
     user = f"Question: {question}\n\nAnswer given: {answer}\n\nExcerpts used:\n{context}"
     try:
         result = client.chat_json(VERIFY_SYSTEM_PROMPT, user, VERIFY_SCHEMA, trace_name="verify")
-    except OllamaError as exc:
+    except ProviderError as exc:
         logger.warning("verification failed, returning answer unverified: %s", exc)
         return None
 
@@ -366,7 +366,7 @@ def _finalize(cache: Any, memory: Any, cfg: Config, generation: int, question: s
 def answer_question_agentic(
     conn: Connection,
     index: VectorIndex,
-    client: OllamaClient,
+    client: LLMClient,
     question: str,
     cfg: Config,
     *,

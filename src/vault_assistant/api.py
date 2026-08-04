@@ -22,8 +22,8 @@ from .actions import extract_actions
 from .config import Config, load_config, setup_logging
 from .ingest import ingest_paths
 from .observability import init_observability
-from .ollama_client import OllamaClient
 from .pii import scan as pii_scan
+from .providers import ProviderError, UnavailableClient, build_client
 from .qa import answer_question
 from .vectors import VectorIndex
 
@@ -112,7 +112,11 @@ def create_app(cfg: Config | None = None) -> FastAPI:
     app = FastAPI(title="Vault Assistant", docs_url=None, redoc_url=None, openapi_url=None)
     app.state.cfg = cfg
     app.state.conn = db.connect(cfg.db_path)
-    app.state.client = OllamaClient.from_config(cfg)
+    try:
+        app.state.client = build_client(cfg)
+    except ProviderError as exc:
+        logger.warning("LLM provider unavailable at startup: %s", exc)
+        app.state.client = UnavailableClient(str(exc))
     app.state.index = VectorIndex(app.state.conn)
     app.state.ingest_lock = threading.Lock()
 
@@ -126,9 +130,14 @@ def create_app(cfg: Config | None = None) -> FastAPI:
     def status() -> dict:
         conn = app.state.conn
         client = app.state.client
+        cfg = app.state.cfg
         up = client.is_up()
         return {
-            "ollama_up": up,
+            "backend_up": up,
+            "provider": cfg.provider,
+            "embed_provider": cfg.embed_provider or cfg.provider,
+            "gen_model": cfg.gen_model,
+            "embed_model": cfg.embed_model,
             "missing_models": client.missing_models() if up else [],
             "documents": conn.execute("SELECT COUNT(*) AS n FROM documents").fetchone()["n"],
             "chunks": conn.execute("SELECT COUNT(*) AS n FROM chunks").fetchone()["n"],
@@ -136,6 +145,15 @@ def create_app(cfg: Config | None = None) -> FastAPI:
                 "SELECT COUNT(*) AS n FROM documents WHERE status = 'error'"
             ).fetchone()["n"],
         }
+
+    @app.get("/api/models")
+    def models() -> dict:
+        client = app.state.client
+        try:
+            available = client.list_models()
+        except Exception as exc:  # noqa: BLE001 — surface backend errors as data, not a 500
+            raise HTTPException(502, f"could not list models: {exc}") from exc
+        return {"provider": app.state.cfg.provider, "models": available}
 
     @app.get("/api/documents")
     def documents() -> list[dict]:

@@ -7,7 +7,7 @@ import re
 from dataclasses import dataclass
 from sqlite3 import Connection
 
-from .ollama_client import QUERY_PREFIX, OllamaClient
+from .providers import LLMClient
 from .vectors import VectorIndex
 
 RRF_K = 60
@@ -59,13 +59,13 @@ def rrf_merge(ranked_lists: list[list[int]], k: int = RRF_K) -> list[tuple[int, 
 def hybrid_search(
     conn: Connection,
     index: VectorIndex,
-    client: OllamaClient,
+    client: LLMClient,
     question: str,
     k_vec: int = 8,
     k_kw: int = 8,
     limit: int = 8,
 ) -> list[RetrievedChunk]:
-    query_vec = client.embed([QUERY_PREFIX + question])[0]
+    query_vec = client.embed([client.query_prefix + question])[0]
     vec_ids = [cid for cid, _ in index.search(query_vec, k=k_vec)]
     kw_ids = keyword_search(conn, question, k=k_kw)
 

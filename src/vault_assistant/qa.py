@@ -15,7 +15,7 @@ from sqlite3 import Connection
 from .chunking import approx_tokens
 from .config import Config
 from .observability import observe, update_current_span
-from .ollama_client import OllamaClient
+from .providers import LLMClient
 from .retrieval import RetrievedChunk, hybrid_search
 from .vectors import VectorIndex
 
@@ -80,7 +80,7 @@ def resolve_citations(answer: str, included: list[RetrievedChunk]) -> list[Sourc
 def answer_question(
     conn: Connection,
     index: VectorIndex,
-    client: OllamaClient,
+    client: LLMClient,
     question: str,
     cfg: Config,
     extra_context: str = "",
