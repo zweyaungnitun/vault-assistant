@@ -16,6 +16,7 @@ from .ingest import ingest_paths
 from .observability import init_observability
 from .pii import scan as pii_scan
 from .providers import PROVIDERS, ProviderError, UnavailableClient, build_client
+from .agents import answer_question_agentic
 from .qa import answer_question
 from .vectors import VectorIndex
 
@@ -104,13 +105,50 @@ def cmd_watch(args) -> None:
 
 def cmd_ask(args) -> None:
     cfg, conn, client = _context()
-    result = answer_question(conn, VectorIndex(conn), client, args.question, cfg)
-    print(result.answer)
-    if result.sources:
-        print("\nSources:")
-        for s in result.sources:
-            loc = f" (page {s.page})" if s.page else ""
-            print(f"  - {s.filename}{loc}")
+    index = VectorIndex(conn)
+
+    # Determine which pipeline to use: CLI flag beats config.
+    use_agentic = cfg.agentic_qa if args.agentic is None else args.agentic
+
+    if use_agentic:
+        result = answer_question_agentic(conn, index, client, args.question, cfg)
+
+        # Pipeline / confidence header
+        pipeline_label = f"[{result.pipeline} pipeline]"
+        if result.verification is not None:
+            conf_pct = int(result.verification.confidence * 100)
+            tick = "✓" if result.verification.is_complete else "⚠"
+            print(f"{pipeline_label} confidence: {conf_pct}% {tick}")
+        elif result.pipeline != "fast":
+            print(pipeline_label)
+
+        # Gaps warning
+        if result.verification and result.verification.gaps:
+            gaps_str = ", ".join(result.verification.gaps)
+            print(f"⚠  gaps: {gaps_str}")
+
+        # Verbose: show how the question was decomposed
+        if args.verbose and result.pipeline == "full" and len(result.sub_queries) > 1:
+            print("Sub-queries:")
+            for sq in result.sub_queries:
+                print(f"  · {sq.question}")
+
+        print()
+        print(result.answer)
+
+        if result.sources:
+            print("\nSources:")
+            for s in result.sources:
+                loc = f" (page {s.page})" if s.page else ""
+                print(f"  - {s.filename}{loc}")
+    else:
+        result = answer_question(conn, index, client, args.question, cfg)
+        print(result.answer)
+        if result.sources:
+            print("\nSources:")
+            for s in result.sources:
+                loc = f" (page {s.page})" if s.page else ""
+                print(f"  - {s.filename}{loc}")
 
 
 def cmd_summarize(args) -> None:
@@ -281,6 +319,25 @@ def main(argv: list[str] | None = None) -> None:
 
     p = sub.add_parser("ask", help="ask a question about your documents")
     p.add_argument("question")
+    agentic_group = p.add_mutually_exclusive_group()
+    agentic_group.add_argument(
+        "--agentic",
+        dest="agentic",
+        action="store_true",
+        default=None,
+        help="force the full agentic pipeline (decompose → retrieve → synthesize → verify)",
+    )
+    agentic_group.add_argument(
+        "--no-agentic",
+        dest="agentic",
+        action="store_false",
+        help="force the fast single-pass pipeline",
+    )
+    p.add_argument(
+        "--verbose", "-v",
+        action="store_true",
+        help="show sub-queries and evidence details (full pipeline only)",
+    )
     p.set_defaults(func=cmd_ask)
 
     p = sub.add_parser("summarize", help="summarize 1-3 documents")

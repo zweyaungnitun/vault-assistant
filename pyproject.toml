@@ -16,6 +16,15 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest>=8.0"]
+observability = ["langfuse>=4.0"]
+# Provider extras (providers.py). "ollama" and "openai"-compatible providers
+# (openai/vllm/openai_compatible) need no extra — they're plain httpx, same
+# as the built-in Ollama client. anthropic/gemini use their official SDKs,
+# true optional deps like langfuse above: uninstalled is fine unless that
+# provider is actually selected in config.toml.
+anthropic = ["anthropic>=0.40"]
+gemini = ["google-genai>=1.0"]
+providers = ["anthropic>=0.40", "google-genai>=1.0"]
 
 [project.scripts]
 vault = "vault_assistant.cli:main"

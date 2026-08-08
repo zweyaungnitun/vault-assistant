@@ -19,6 +19,7 @@ from pydantic import BaseModel, Field
 
 from . import db, permissions, reminders, summarize
 from .actions import extract_actions
+from .agents import answer_question_agentic
 from .config import Config, load_config, setup_logging
 from .ingest import ingest_paths
 from .observability import init_observability
@@ -34,6 +35,7 @@ WEB_DIR = Path(__file__).parent / "web"
 
 class AskRequest(BaseModel):
     question: str = Field(min_length=1)
+    agentic: bool | None = None  # None = follow cfg.agentic_qa; True/False overrides per-request
 
 
 class IngestRequest(BaseModel):
@@ -248,6 +250,22 @@ def create_app(cfg: Config | None = None) -> FastAPI:
 
     @app.post("/api/ask")
     def ask(req: AskRequest) -> dict:
+        use_agentic = app.state.cfg.agentic_qa if req.agentic is None else req.agentic
+        if use_agentic:
+            result = answer_question_agentic(
+                app.state.conn, app.state.index, app.state.client, req.question, app.state.cfg
+            )
+            return {
+                "answer": result.answer,
+                "sources": [
+                    {"filename": s.filename, "path": s.path, "page": s.page}
+                    for s in result.sources
+                ],
+                "pipeline": result.pipeline,
+                "sub_queries": [sq.question for sq in result.sub_queries],
+                "evidence_confidence": result.evidence_confidence,
+                "verification": result.verification.to_dict() if result.verification else None,
+            }
         result = answer_question(
             app.state.conn, app.state.index, app.state.client, req.question, app.state.cfg
         )
@@ -256,6 +274,10 @@ def create_app(cfg: Config | None = None) -> FastAPI:
             "sources": [
                 {"filename": s.filename, "path": s.path, "page": s.page} for s in result.sources
             ],
+            "pipeline": "fast",
+            "sub_queries": [req.question],
+            "evidence_confidence": None,
+            "verification": None,
         }
 
     @app.post("/api/summarize")
